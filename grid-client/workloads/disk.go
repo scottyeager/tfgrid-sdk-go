@@ -12,6 +12,7 @@ type Disk struct {
 	Name        string `json:"name"`
 	SizeGB      int    `json:"size"`
 	Description string `json:"description"`
+	Metadata    string `json:"metadata"`
 }
 
 // NewDiskFromWorkload generates a new disk from a workload
@@ -29,6 +30,7 @@ func NewDiskFromWorkload(wl *gridtypes.Workload) (Disk, error) {
 	return Disk{
 		Name:        wl.Name.String(),
 		Description: wl.Description,
+		Metadata:    wl.Metadata,
 		SizeGB:      int(data.Size / gridtypes.Gigabyte),
 	}, nil
 }
@@ -40,6 +42,7 @@ func (d *Disk) ZosWorkload() gridtypes.Workload {
 		Version:     0,
 		Type:        zos.ZMountType,
 		Description: d.Description,
+		Metadata:    d.Metadata,
 		Data: gridtypes.MustMarshal(zos.ZMount{
 			Size: gridtypes.Unit(d.SizeGB) * gridtypes.Gigabyte,
 		}),
