@@ -9,6 +9,7 @@ import (
 	"strings"
 	"strconv"
 
+	bip39 "github.com/cosmos/go-bip39"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 	command "github.com/threefoldtech/tfgrid-sdk-go/grid-cli/internal/cmd"
@@ -23,16 +24,42 @@ var recoverVMCmd = &cobra.Command{
 	Short: "Recover a full VM",
 	Args:  cobra.ExactArgs(0),
 	Run: func(cmd *cobra.Command, args []string) {
-		// Load existing mnemonics/network
-		cfg, err := config.GetUserConfig()
-		if err != nil {
-			log.Fatal().Err(err).Send()
-		}
-
 		// Set up a scanner to read input from user
 		scanner := bufio.NewReader(os.Stdin)
 
-		t, err := deployer.NewTFPluginClient(cfg.Mnemonics, "sr25519", cfg.Network, "", "", "", 30, false)
+		mnemonics, network := "", ""
+		// Try loading existing mnemonics/network
+		cfg, err := config.GetUserConfig()
+		if err != nil {
+			// Offer the option to enter mnemonics for one time use
+			fmt.Println("No config file found on disk. To store your seed phrase and preferred network, use the login command\n\nEnter your mnemonic seed phrase: ")
+
+			mnemonics, err = scanner.ReadString('\n')
+			if err != nil {
+				log.Fatal().Err(err)
+			}
+			mnemonics = strings.TrimSpace(mnemonics)
+			if !bip39.IsMnemonicValid(mnemonics) {
+				log.Fatal().Str("Error", "failed to validate mnemonics")
+			}
+		
+			fmt.Print("Please enter grid network (main,test): ")
+			network, err = scanner.ReadString('\n')
+			if err != nil {
+				log.Fatal().Err(err)
+			}
+			network = strings.TrimSpace(network)
+		
+			if network != "dev" && network != "qa" && network != "test" && network != "main" {
+				log.Fatal().Str("Error", "invalid grid network, must be one of: dev, test, qa and main")
+			}
+		} else {
+			mnemonics, network = cfg.Mnemonics, cfg.Network
+		}
+
+
+
+		t, err := deployer.NewTFPluginClient(mnemonics, "sr25519", network, "", "", "", 30, false)
 		if err != nil {
 			log.Fatal().Err(err).Send()
 		}
