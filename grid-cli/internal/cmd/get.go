@@ -21,42 +21,39 @@ func checkIfExistAndAppend(t deployer.TFPluginClient, node uint32, contractID ui
 }
 
 // GetVM gets a vm with its project name
+<<<<<<< HEAD
 func GetVM(ctx context.Context, t deployer.TFPluginClient, name string) (workloads.Deployment, error) {
-	projectName := name
+	nodeContractIDs, err := t.ContractsGetter.GetNodeContractsByTypeAndName(projectname, workloads.VMType, name)
+	if err != nil {
+		return workloads.Deployment{}, err
+	}
+	var nodeID uint32
+	for node, contractID := range nodeContractIDs {
+		checkIfExistAndAppend(t, node, contractID)
+		nodeID = node
+	}
 
-	// try to get contracts with the old project name format "<name>"
-	contracts, err := t.ContractsGetter.ListContractsOfProjectName(projectName, true)
+	// I guess we gotta do all this to derive the network name and there's no
+	// better way?
+	_, deployment, err := t.State.GetWorkloadInDeployment(nodeID, "", name)
+	if err != nil {
+		return workloads.Deployment{}, err
+	}
+	d, err := workloads.NewDeploymentFromZosDeployment(deployment, nodeID)
 	if err != nil {
 		return workloads.Deployment{}, err
 	}
 
-	if len(contracts.NodeContracts) == 0 {
-		// if could not find any contracts try to get contracts with the new project name format "vm/<name>"
-		projectName = fmt.Sprintf("vm/%s", name)
-		contracts, err = t.ContractsGetter.ListContractsOfProjectName(projectName, true)
-		if err != nil {
-			return workloads.Deployment{}, err
-		}
-
-		if len(contracts.NodeContracts) == 0 {
-			return workloads.Deployment{}, fmt.Errorf("couldn't find any contracts with name %s", name)
-		}
+	networkContractIDs, err := t.ContractsGetter.GetNodeContractsByTypeAndName(projectname, workloads.NetworkType, d.NetworkName)
+	if err != nil {
+		return workloads.Deployment{}, err
 	}
 
-	var nodeID uint32
-
-	for _, contract := range contracts.NodeContracts {
-		contractID, err := strconv.ParseUint(contract.ContractID, 10, 64)
-		if err != nil {
-			return workloads.Deployment{}, err
-		}
-
-		nodeID = contract.NodeID
-		checkIfExistAndAppend(t, nodeID, contractID)
-
+	for node, contractID := range networkContractIDs {
+		checkIfExistAndAppend(t, node, contractID)
 	}
 
-	return t.State.LoadDeploymentFromGrid(ctx, nodeID, name)
+	return t.State.LoadDeploymentFromGrid(nodeID, name)
 }
 
 // GetK8sCluster gets a kubernetes cluster with its project name

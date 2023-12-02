@@ -15,7 +15,7 @@ import (
 var getVMCmd = &cobra.Command{
 	Use:   "vm",
 	Short: "Get deployed vm",
-	Args:  cobra.ExactArgs(1),
+	Args:  cobra.ExactArgs(2),
 	Run: func(cmd *cobra.Command, args []string) {
 		cfg, err := config.GetUserConfig()
 		if err != nil {
@@ -27,7 +27,7 @@ var getVMCmd = &cobra.Command{
 			log.Fatal().Err(err).Send()
 		}
 
-		vm, err := command.GetVM(cmd.Context(), t, args[0])
+		vm, err := command.GetVM(cmd.Context(), t, args[0], args[1])
 		if err != nil {
 			log.Fatal().Err(err).Send()
 		}
