@@ -14,12 +14,12 @@ import (
 )
 
 // DeployVM deploys a vm with mounts
-func DeployVM(ctx context.Context, t deployer.TFPluginClient, vm workloads.VM, mount workloads.Disk, node uint32) (workloads.VM, error) {
+func DeployVM(ctx context.Context, t deployer.TFPluginClient, vm workloads.VM, mount workloads.Disk, node uint32, wg_access bool) (workloads.VM, workloads.ZNet, error) {
 	networkName := fmt.Sprintf("%snetwork", vm.Name)
 	projectName := fmt.Sprintf("vm/%s", vm.Name)
-	network, err := buildNetwork(networkName, projectName, []uint32{node}, len(vm.MyceliumIPSeed) != 0)
+	network, err := buildNetwork(networkName, projectName, []uint32{node}, len(vm.MyceliumIPSeed) != 0, wg_access)
 	if err != nil {
-		return workloads.VM{}, err
+		return workloads.VM{}, workloads.ZNet{}, err
 	}
 
 	mounts := []workloads.Disk{}
@@ -32,7 +32,7 @@ func DeployVM(ctx context.Context, t deployer.TFPluginClient, vm workloads.VM, m
 	log.Info().Msg("deploying network")
 	err = t.NetworkDeployer.Deploy(ctx, &network)
 	if err != nil {
-		return workloads.VM{}, errors.Wrapf(err, "failed to deploy network on node %d", node)
+		return workloads.VM{}, workloads.ZNet{}, errors.Wrapf(err, "failed to deploy network on node %d", node)
 	}
 
 	log.Info().Msg("deploying vm")
@@ -43,13 +43,13 @@ func DeployVM(ctx context.Context, t deployer.TFPluginClient, vm workloads.VM, m
 		if revertErr != nil {
 			log.Error().Err(revertErr).Msg("failed to remove network")
 		}
-		return workloads.VM{}, errors.Wrapf(err, "failed to deploy vm on node %d", node)
+		return workloads.VM{}, workloads.ZNet{}, errors.Wrapf(err, "failed to deploy vm on node %d", node)
 	}
 	resVM, err := t.State.LoadVMFromGrid(ctx, node, vm.Name, dl.Name)
 	if err != nil {
-		return workloads.VM{}, errors.Wrapf(err, "failed to load vm from node %d", node)
+		return workloads.VM{}, workloads.ZNet{}, errors.Wrapf(err, "failed to load vm from node %d", node)
 	}
-	return resVM, nil
+	return resVM, network, nil
 }
 
 // DeployKubernetesCluster deploys a kubernetes cluster
@@ -60,7 +60,7 @@ func DeployKubernetesCluster(ctx context.Context, t deployer.TFPluginClient, mas
 	if len(workers) > 0 && workers[0].Node != master.Node {
 		networkNodes = append(networkNodes, workers[0].Node)
 	}
-	network, err := buildNetwork(networkName, projectName, networkNodes, len(master.MyceliumIPSeed) != 0)
+	network, err := buildNetwork(networkName, projectName, networkNodes, len(master.MyceliumIPSeed) != 0, false)
 	if err != nil {
 		return workloads.K8sCluster{}, err
 	}
@@ -143,7 +143,7 @@ func DeployZDBs(ctx context.Context, t deployer.TFPluginClient, projectName stri
 	return resZDBs, nil
 }
 
-func buildNetwork(name, projectName string, nodes []uint32, addMycelium bool) (workloads.ZNet, error) {
+func buildNetwork(name, projectName string, nodes []uint32, addMycelium bool, addWg bool) (workloads.ZNet, error) {
 	keys := make(map[uint32][]byte)
 	if addMycelium {
 		for _, node := range nodes {
@@ -163,5 +163,6 @@ func buildNetwork(name, projectName string, nodes []uint32, addMycelium bool) (w
 		}),
 		MyceliumKeys: keys,
 		SolutionType: projectName,
+		AddWGAccess: addWg,
 	}, nil
 }

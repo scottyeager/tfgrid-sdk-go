@@ -100,6 +100,10 @@ var deployVMCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		wg_access, err := cmd.Flags().GetBool("wg-access")
+		if err != nil {
+			return err
+		}
 		var seed []byte
 		if mycelium {
 			seed, err = workloads.RandomMyceliumIPSeed()
@@ -153,7 +157,7 @@ var deployVMCmd = &cobra.Command{
 
 			node = uint32(nodes[0].NodeID)
 		}
-		resVM, err := command.DeployVM(cmd.Context(), t, vm, mount, node)
+		resVM, network, err := command.DeployVM(cmd.Context(), t, vm, mount, node, wg_access)
 		if err != nil {
 			log.Fatal().Err(err).Send()
 		}
@@ -169,6 +173,10 @@ var deployVMCmd = &cobra.Command{
 		}
 		if mycelium {
 			log.Info().Msgf("vm mycelium ip: %s", resVM.MyceliumIP)
+		}
+		if wg_access {
+			log.Info().Msgf("vm wireguard ip: %s", resVM.IP)
+			log.Info().Msgf("vm wireguard config: %s", network.AccessWGConfig)
 		}
 		return nil
 	},
@@ -208,4 +216,5 @@ func init() {
 	deployVMCmd.Flags().Bool("ipv6", false, "assign public ipv6 for vm")
 	deployVMCmd.Flags().Bool("ygg", true, "assign yggdrasil ip for vm")
 	deployVMCmd.Flags().Bool("mycelium", true, "assign mycelium ip for vm")
+	deployVMCmd.Flags().Bool("wg-access", false, "add wireguard access to the vm network")
 }
