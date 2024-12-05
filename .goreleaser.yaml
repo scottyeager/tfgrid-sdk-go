@@ -2,20 +2,20 @@
 # Make sure to check the documentation at https://goreleaser.com
 version: 2
 builds:
-  - dir: ./farmerbot
-    env:
-      - CGO_ENABLED=0
-    goos:
-      - linux
-      - windows
-      - darwin
-    binary: farmerbot
-    id: farmerbot
+  #   - dir: ./farmerbot
+  #     env:
+  #       - CGO_ENABLED=0
+  #     goos:
+  #       - linux
+  #       - windows
+  #       - darwin
+  #     binary: farmerbot
+  #     id: farmerbot
 
-    ignore:
-      - goos: windows
-    ldflags:
-      - -X github.com/threefoldtech/tfgrid-sdk-go/farmerbot/version.Version={{.Tag}}
+  #     ignore:
+  #       - goos: windows
+  #     ldflags:
+  #       - -X github.com/threefoldtech/tfgrid-sdk-go/farmerbot/version.Version={{.Tag}}
 
   - dir: ./grid-cli
     env:
@@ -33,99 +33,99 @@ builds:
       - -X github.com/threefoldtech/tfgrid-sdk-go/grid-cli/cmd.version={{.Tag}}
       - -X github.com/threefoldtech/tfgrid-sdk-go/grid-cli/cmd.commit={{.Commit}}
 
-  - dir: ./grid-cli
-    env:
-      - CGO_ENABLED=0
-    goos:
-      - linux
-      - windows
-      - darwin
-    binary: tf-grid-cli
-    id: tf-grid-cli
+  # - dir: ./grid-cli
+  #   env:
+  #     - CGO_ENABLED=0
+  #   goos:
+  #     - linux
+  #     - windows
+  #     - darwin
+  #   binary: tf-grid-cli
+  #   id: tf-grid-cli
 
-    ignore:
-      - goos: windows
-    ldflags:
-      - -X github.com/threefoldtech/tfgrid-sdk-go/grid-cli/cmd.version={{.Tag}}
-      - -X github.com/threefoldtech/tfgrid-sdk-go/grid-cli/cmd.commit={{.Commit}}
+  #   ignore:
+  #     - goos: windows
+  #   ldflags:
+  #     - -X github.com/threefoldtech/tfgrid-sdk-go/grid-cli/cmd.version={{.Tag}}
+  #     - -X github.com/threefoldtech/tfgrid-sdk-go/grid-cli/cmd.commit={{.Commit}}
 
-  - dir: ./tfrobot
-    env:
-      - CGO_ENABLED=0
-    goos:
-      - linux
-      - windows
-      - darwin
-    binary: tfrobot
-    id: tfrobot
+#   - dir: ./tfrobot
+#     env:
+#       - CGO_ENABLED=0
+#     goos:
+#       - linux
+#       - windows
+#       - darwin
+#     binary: tfrobot
+#     id: tfrobot
 
-    ignore:
-      - goos: windows
-    ldflags:
-      - -X github.com/threefoldtech/tfgrid-sdk-go/tfrobot/cmd.version={{.Tag}}
-      - -X github.com/threefoldtech/tfgrid-sdk-go/tfrobot/cmd.commit={{.Commit}}
+#     ignore:
+#       - goos: windows
+#     ldflags:
+#       - -X github.com/threefoldtech/tfgrid-sdk-go/tfrobot/cmd.version={{.Tag}}
+#       - -X github.com/threefoldtech/tfgrid-sdk-go/tfrobot/cmd.commit={{.Commit}}
 
-  - dir: ./grid-proxy/cmds/proxy_server
-    env:
-      - CGO_ENABLED=0
-    goos:
-      - linux
-      - windows
-      - darwin
-    binary: tfgridproxy
-    id: tfgridproxy
+#   - dir: ./grid-proxy/cmds/proxy_server
+#     env:
+#       - CGO_ENABLED=0
+#     goos:
+#       - linux
+#       - windows
+#       - darwin
+#     binary: tfgridproxy
+#     id: tfgridproxy
 
-    ignore:
-      - goos: windows
-    ldflags:
-      - -w -s -X github.com/threefoldtech/tfgrid-sdk-go/grid-proxy/cmd.version={{.Tag}} -extldflags '-static'
-      - -X github.com/threefoldtech/tfgrid-sdk-go/grid-proxy/cmd.commit={{.Commit}}
+#     ignore:
+#       - goos: windows
+#     ldflags:
+#       - -w -s -X github.com/threefoldtech/tfgrid-sdk-go/grid-proxy/cmd.version={{.Tag}} -extldflags '-static'
+#       - -X github.com/threefoldtech/tfgrid-sdk-go/grid-proxy/cmd.commit={{.Commit}}
 
-  - dir: ./gridify
-    env:
-      - CGO_ENABLED=0
-    goos:
-      - linux
-      - windows
-      - darwin
-    binary: gridify
-    id: gridify
+#   - dir: ./gridify
+#     env:
+#       - CGO_ENABLED=0
+#     goos:
+#       - linux
+#       - windows
+#       - darwin
+#     binary: gridify
+#     id: gridify
 
-    ignore:
-      - goos: windows
-    ldflags:
-      - -X github.com/threefoldtech/tfgrid-sdk-go/gridify/cmd.version={{.Tag}}
-      - -X github.com/threefoldtech/tfgrid-sdk-go/gridify/cmd.commit={{.Commit}}
+#     ignore:
+#       - goos: windows
+#     ldflags:
+#       - -X github.com/threefoldtech/tfgrid-sdk-go/gridify/cmd.version={{.Tag}}
+#       - -X github.com/threefoldtech/tfgrid-sdk-go/gridify/cmd.commit={{.Commit}}
 
-  - dir: ./monitoring-bot
-    env:
-      - CGO_ENABLED=0
-    goos:
-      - linux
-      - windows
-      - darwin
-    binary: monitoring-bot
-    id: monitoring-bot
+#   - dir: ./monitoring-bot
+#     env:
+#       - CGO_ENABLED=0
+#     goos:
+#       - linux
+#       - windows
+#       - darwin
+#     binary: monitoring-bot
+#     id: monitoring-bot
 
-    ignore:
-      - goos: windows
-    ldflags:
-      - -X github.com/threefoldtech/tfgrid-sdk-go/monitoring-bot/cmd.version={{.Tag}}
-      - -X github.com/threefoldtech/tfgrid-sdk-go/monitoring-bot/cmd.commit={{.Commit}}
+#     ignore:
+#       - goos: windows
+#     ldflags:
+#       - -X github.com/threefoldtech/tfgrid-sdk-go/monitoring-bot/cmd.version={{.Tag}}
+#       - -X github.com/threefoldtech/tfgrid-sdk-go/monitoring-bot/cmd.commit={{.Commit}}
 
-  - dir: ./tools/relay-cache-warmer
-    goos:
-      - linux
-      - windows
-      - darwin
-    binary: cache-warmer
-    id: cache-warmer
+#   - dir: ./tools/relay-cache-warmer
+#     goos:
+#       - linux
+#       - windows
+#       - darwin
+#     binary: cache-warmer
+#     id: cache-warmer
 
-    ignore:
-      - goos: windows
-    ldflags:
-      - -X main.version={{.Tag}}
-      - -X main.commit={{.Commit}}
+#     ignore:
+#       - goos: windows
+#     ldflags:
+#       - -X main.version={{.Tag}}
+#       - -X main.commit={{.Commit}}
 
 archives:
   - format: tar.gz
