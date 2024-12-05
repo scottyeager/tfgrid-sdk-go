@@ -21,8 +21,7 @@ func checkIfExistAndAppend(t deployer.TFPluginClient, node uint32, contractID ui
 }
 
 // GetVM gets a vm with its project name
-<<<<<<< HEAD
-func GetVM(ctx context.Context, t deployer.TFPluginClient, name string) (workloads.Deployment, error) {
+func GetVM(ctx context.Context, t deployer.TFPluginClient, projectname string, name string) (workloads.Deployment, error) {
 	nodeContractIDs, err := t.ContractsGetter.GetNodeContractsByTypeAndName(projectname, workloads.VMType, name)
 	if err != nil {
 		return workloads.Deployment{}, err
@@ -35,7 +34,7 @@ func GetVM(ctx context.Context, t deployer.TFPluginClient, name string) (workloa
 
 	// I guess we gotta do all this to derive the network name and there's no
 	// better way?
-	_, deployment, err := t.State.GetWorkloadInDeployment(nodeID, "", name)
+	_, deployment, err := t.State.GetWorkloadInDeployment(ctx, nodeID, "", name)
 	if err != nil {
 		return workloads.Deployment{}, err
 	}
@@ -53,7 +52,7 @@ func GetVM(ctx context.Context, t deployer.TFPluginClient, name string) (workloa
 		checkIfExistAndAppend(t, node, contractID)
 	}
 
-	return t.State.LoadDeploymentFromGrid(nodeID, name)
+	return t.State.LoadDeploymentFromGrid(ctx, nodeID, name)
 }
 
 // GetK8sCluster gets a kubernetes cluster with its project name

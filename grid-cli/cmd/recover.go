@@ -24,6 +24,7 @@ var recoverVMCmd = &cobra.Command{
 	Short: "Recover a full VM",
 	Args:  cobra.ExactArgs(0),
 	Run: func(cmd *cobra.Command, args []string) {
+		ctx := cmd.Context()
 		// Set up a scanner to read input from user
 		scanner := bufio.NewReader(os.Stdin)
 
@@ -59,7 +60,7 @@ var recoverVMCmd = &cobra.Command{
 
 
 
-		t, err := deployer.NewTFPluginClient(mnemonics, "sr25519", network, "", "", "", 30, false)
+		t, err := deployer.NewTFPluginClient(cfg.Mnemonics, deployer.WithNetwork(cfg.Network), deployer.WithRMBTimeout(100))
 		if err != nil {
 			log.Fatal().Err(err).Send()
 		}
@@ -127,7 +128,7 @@ var recoverVMCmd = &cobra.Command{
 		fmt.Println("Retrieving deployment data...")
 
 		// Now we query the workload data from Zos and convert it into our local workload type
-		_, zosdeployment, err := t.State.GetWorkloadInDeployment(nodeID, "", name)
+		_, zosdeployment, err := t.State.GetWorkloadInDeployment(ctx, nodeID, "", name)
 		if err != nil {
 			log.Fatal().Err(err).Send()
 		}
@@ -183,7 +184,7 @@ var recoverVMCmd = &cobra.Command{
 			t.State.CurrentNodeDeployments[node] = append(t.State.CurrentNodeDeployments[node], contractID)
 		}
 
-		_, err = t.State.LoadNetworkFromGrid(deployment.NetworkName)
+		_, err = t.State.LoadNetworkFromGrid(ctx, deployment.NetworkName)
 		if err != nil {
 			log.Fatal().Err(err).Send()
 		}
@@ -232,10 +233,10 @@ var recoverVMCmd = &cobra.Command{
 			olddisk := deployment.Disks[0]
 			newdisk := workloads.Disk{Name: "disk" + strconv.Itoa(len(deployment.Disks) + 1), SizeGB: olddisk.SizeGB}
 
-			vm.Mounts = []workloads.Mount{{DiskName: newdisk.Name, MountPoint: "/"}, {DiskName: olddisk.Name, MountPoint: "/mnt"}}
+			vm.Mounts = []workloads.Mount{{Name: newdisk.Name, MountPoint: "/"}, {Name: olddisk.Name, MountPoint: "/mnt"}}
 
 			for i, disk := range deployment.Disks {
-				vm.Mounts = append(vm.Mounts, workloads.Mount{DiskName: disk.Name, MountPoint: "/mnt/" + strconv.Itoa(i)})
+				vm.Mounts = append(vm.Mounts, workloads.Mount{Name: disk.Name, MountPoint: "/mnt/" + strconv.Itoa(i)})
 			}
 
 			// Update the name so zos doesn't think this is an upgrade (?)
@@ -262,10 +263,10 @@ var recoverVMCmd = &cobra.Command{
 				Name:   "disk" + strconv.Itoa(len(deployment.Disks) + 1),
 				SizeGB: 15,
 			}
-			mounts := []workloads.Mount{{DiskName: newdisk.Name, MountPoint: "/"}}
+			mounts := []workloads.Mount{{Name: newdisk.Name, MountPoint: "/"}}
 
 			for i, disk := range deployment.Disks {
-				mounts = append(mounts, workloads.Mount{DiskName: disk.Name, MountPoint: "/mnt/" + strconv.Itoa(i)})
+				mounts = append(mounts, workloads.Mount{Name: disk.Name, MountPoint: "/mnt/" + strconv.Itoa(i)})
 			}
 
 			// Since we lost the info about users previous VM, allow them to add public IPs. Wireguard access should still work
@@ -290,7 +291,7 @@ var recoverVMCmd = &cobra.Command{
 				Planetary:  true,
 				PublicIP:   ipv4,
 				PublicIP6:  ipv6,
-				Memory:     1024,
+				MemoryMB:     1024,
 				EnvVars: map[string]string{
 					"SSH_KEY": newsshkey,
 				},
@@ -312,7 +313,7 @@ var recoverVMCmd = &cobra.Command{
 		fmt.Println("Finished with redeployment. New VM info:")
 
 		// Try to fetch the result
-		resVM, err := command.GetVM(t, projectname, name)
+		resVM, err := command.GetVM(ctx, t, projectname, name)
 		if err != nil {
 			log.Fatal().Err(err).Send()
 		}
