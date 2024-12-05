@@ -2,12 +2,12 @@
 package cmd
 
 import (
-	"encoding/json"
 	"bufio"
-	"os"
+	"encoding/json"
 	"fmt"
-	"strings"
+	"os"
 	"strconv"
+	"strings"
 
 	bip39 "github.com/cosmos/go-bip39"
 	"github.com/rs/zerolog/log"
@@ -15,8 +15,8 @@ import (
 	command "github.com/threefoldtech/tfgrid-sdk-go/grid-cli/internal/cmd"
 	"github.com/threefoldtech/tfgrid-sdk-go/grid-cli/internal/config"
 	"github.com/threefoldtech/tfgrid-sdk-go/grid-client/deployer"
-	"github.com/threefoldtech/tfgrid-sdk-go/grid-client/workloads"
 	"github.com/threefoldtech/tfgrid-sdk-go/grid-client/graphql"
+	"github.com/threefoldtech/tfgrid-sdk-go/grid-client/workloads"
 )
 
 var recoverVMCmd = &cobra.Command{
@@ -43,22 +43,20 @@ var recoverVMCmd = &cobra.Command{
 			if !bip39.IsMnemonicValid(mnemonics) {
 				log.Fatal().Str("Error", "failed to validate mnemonics")
 			}
-		
+
 			fmt.Print("Please enter grid network (main,test): ")
 			network, err = scanner.ReadString('\n')
 			if err != nil {
 				log.Fatal().Err(err)
 			}
 			network = strings.TrimSpace(network)
-		
+
 			if network != "dev" && network != "qa" && network != "test" && network != "main" {
 				log.Fatal().Str("Error", "invalid grid network, must be one of: dev, test, qa and main")
 			}
 		} else {
 			mnemonics, network = cfg.Mnemonics, cfg.Network
 		}
-
-
 
 		t, err := deployer.NewTFPluginClient(cfg.Mnemonics, deployer.WithNetwork(cfg.Network), deployer.WithRMBTimeout(100))
 		if err != nil {
@@ -78,12 +76,8 @@ var recoverVMCmd = &cobra.Command{
 		}
 
 		for _, c := range contracts.NodeContracts {
-			var data map[string]string
-			err = json.Unmarshal([]byte(c.DeploymentData), &data)
-			if err != nil {
-				log.Fatal().Err(err).Send()
-			}
-			if data["type"] == "vm" {
+			data, _ := workloads.ParseDeploymentData(c.DeploymentData)
+			if data.Type == "vm" {
 				fmt.Printf("Contract ID: %v Node ID: %v Deployment data: %v\n", c.ContractID, c.NodeID, c.DeploymentData)
 			}
 		}
@@ -99,7 +93,7 @@ var recoverVMCmd = &cobra.Command{
 		var contract graphql.Contract
 
 		for _, c := range contracts.NodeContracts {
-			if c.ContractID == contractinput {	
+			if c.ContractID == contractinput {
 				contract = c
 			}
 		}
@@ -114,16 +108,13 @@ var recoverVMCmd = &cobra.Command{
 		// We gotta populate the state, otherwise can't retrieve deployment later
 		t.State.CurrentNodeDeployments[nodeID] = append(t.State.CurrentNodeDeployments[nodeID], uint64(contractID))
 
-		// Convert json string depoyment data into a map
-		var deploymentdata map[string]string
-
-		err = json.Unmarshal([]byte(contract.DeploymentData), &deploymentdata)
+		data, err := workloads.ParseDeploymentData(contract.DeploymentData)
 		if err != nil {
 			log.Fatal().Err(err).Send()
 		}
 
-		name := deploymentdata["name"]
-		projectname := deploymentdata["projectName"]
+		name := data.Name
+		projectname := data.ProjectName
 
 		fmt.Println("Retrieving deployment data...")
 
@@ -179,7 +170,7 @@ var recoverVMCmd = &cobra.Command{
 		if err != nil {
 			log.Fatal().Err(err).Send()
 		}
-	
+
 		for node, contractID := range networkContractIDs {
 			t.State.CurrentNodeDeployments[node] = append(t.State.CurrentNodeDeployments[node], contractID)
 		}
@@ -228,12 +219,19 @@ var recoverVMCmd = &cobra.Command{
 				os.Exit(0)
 			}
 
+			// If the user tried to recover the wrong style VM, there might be
+			// no disks
+			if len(deployment.Disks) == 0 {
+				fmt.Println("No disks found in deployment. Nothing to recover. Exiting.")
+				os.Exit(0)
+			}
 			// Now we make a new VM with the old VMs disks attached as mounts
 			// First, make a new disk with the same size as old one, for rootfs
 			olddisk := deployment.Disks[0]
-			newdisk := workloads.Disk{Name: "disk" + strconv.Itoa(len(deployment.Disks) + 1), SizeGB: olddisk.SizeGB}
+			newdisk := workloads.Disk{Name: "disk" + strconv.Itoa(len(deployment.Disks)+1), SizeGB: olddisk.SizeGB}
 
-			vm.Mounts = []workloads.Mount{{Name: newdisk.Name, MountPoint: "/"}, {Name: olddisk.Name, MountPoint: "/mnt"}}
+			// We can't specify "/" as the mount point anymore, even though it's where the new disk will get mounted. So we just write "/home" as a placeholder
+			vm.Mounts = []workloads.Mount{{Name: newdisk.Name, MountPoint: "/home"}}
 
 			for i, disk := range deployment.Disks {
 				vm.Mounts = append(vm.Mounts, workloads.Mount{Name: disk.Name, MountPoint: "/mnt/" + strconv.Itoa(i)})
@@ -244,7 +242,7 @@ var recoverVMCmd = &cobra.Command{
 			deployment.Vms = []workloads.VM{vm}
 			deployment.Disks = append(deployment.Disks, newdisk)
 
-		// VM is already gone, but we still have a disk
+			// VM is already gone, but we still have a disk
 		} else if len(deployment.Vms) == 0 && len(deployment.Disks) > 0 {
 			fmt.Print("\nNo VM found on this deployment. Deploying a new VM with these disk(s) attached.\nPlease enter SSH key for new VM: ")
 
@@ -260,10 +258,11 @@ var recoverVMCmd = &cobra.Command{
 			}
 
 			newdisk := workloads.Disk{
-				Name:   "disk" + strconv.Itoa(len(deployment.Disks) + 1),
+				Name:   "disk" + strconv.Itoa(len(deployment.Disks)+1),
 				SizeGB: 15,
 			}
-			mounts := []workloads.Mount{{Name: newdisk.Name, MountPoint: "/"}}
+			// We can't specify "/" as the mount point anymore, even though it's where the new disk will get mounted. So we just write "/home" as a placeholder
+			mounts := []workloads.Mount{{Name: newdisk.Name, MountPoint: "/home"}}
 
 			for i, disk := range deployment.Disks {
 				mounts = append(mounts, workloads.Mount{Name: disk.Name, MountPoint: "/mnt/" + strconv.Itoa(i)})
@@ -277,7 +276,7 @@ var recoverVMCmd = &cobra.Command{
 				log.Fatal().Err(err).Send()
 			}
 
-			ipv4, ipv6  := false, false
+			ipv4, ipv6 := false, false
 			if strings.Contains(pubip, "4") {
 				ipv4 = true
 			} else if strings.Contains(pubip, "6") {
@@ -285,17 +284,17 @@ var recoverVMCmd = &cobra.Command{
 			}
 
 			vm := workloads.VM{
-				Name:       "vm",
-				Flist:      "https://hub.grid.tf/tf-official-vms/ubuntu-22.04.flist",
-				CPU:        1,
-				Planetary:  true,
-				PublicIP:   ipv4,
-				PublicIP6:  ipv6,
-				MemoryMB:     1024,
+				Name:      "vm",
+				Flist:     "https://hub.grid.tf/tf-official-vms/ubuntu-22.04.flist",
+				CPU:       1,
+				Planetary: true,
+				PublicIP:  ipv4,
+				PublicIP6: ipv6,
+				MemoryMB:  1024,
 				EnvVars: map[string]string{
 					"SSH_KEY": newsshkey,
 				},
-				Mounts: mounts,
+				Mounts:      mounts,
 				NetworkName: deployment.NetworkName,
 			}
 			deployment.Vms = []workloads.VM{vm}
