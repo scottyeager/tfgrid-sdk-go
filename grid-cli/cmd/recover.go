@@ -167,8 +167,12 @@ var recoverVMCmd = &cobra.Command{
 		}
 
 		networkContractIDs, err := t.ContractsGetter.GetNodeContractsByTypeAndName(projectname, workloads.NetworkType, deployment.NetworkName)
+		// The error case is no results found. Since there have been changes to the naming scheme, we'll go on and try an older style
 		if err != nil {
-			log.Fatal().Err(err).Send()
+			networkContractIDs, err = t.ContractsGetter.GetNodeContractsByTypeAndName("Fullvm", workloads.NetworkType, deployment.NetworkName)
+			if err != nil {
+				log.Fatal().Err(err).Send()
+			}
 		}
 
 		for node, contractID := range networkContractIDs {
