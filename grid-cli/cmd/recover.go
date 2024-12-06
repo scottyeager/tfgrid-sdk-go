@@ -289,6 +289,7 @@ var recoverVMCmd = &cobra.Command{
 
 			vm := workloads.VM{
 				Name:      "vm",
+				NodeID:    deployment.NodeID,
 				Flist:     "https://hub.grid.tf/tf-official-vms/ubuntu-22.04.flist",
 				CPU:       1,
 				Planetary: true,
