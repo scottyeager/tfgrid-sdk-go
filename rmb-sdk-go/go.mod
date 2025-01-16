@@ -1,4 +1,4 @@
-module github.com/threefoldtech/tfgrid-sdk-go/rmb-sdk-go
+module github.com/scottyeager/tfgrid-sdk-go/rmb-sdk-go
 
 go 1.21
 

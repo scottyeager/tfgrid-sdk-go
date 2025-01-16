@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -124,7 +125,7 @@ func newTmpCache(ttl uint64, inner TwinDB, chainURL string) (TwinDB, error) {
 	if err != nil {
 		return nil, err
 	}
-	path := filepath.Join(os.TempDir(), "rmb-cache", u.Host)
+	path := filepath.Join(os.TempDir(), "rmb-cache", strings.ReplaceAll(u.Host, ":", "-"))
 	if err := os.MkdirAll(path, 0755); err != nil {
 		return nil, err
 	}
