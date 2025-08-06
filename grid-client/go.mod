@@ -1,4 +1,4 @@
-module github.com/threefoldtech/tfgrid-sdk-go/grid-client
+module github.com/scottyeager/tfgrid-sdk-go/grid-client
 
 go 1.21
 
