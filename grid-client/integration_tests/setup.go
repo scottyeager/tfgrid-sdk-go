@@ -14,9 +14,9 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"github.com/threefoldtech/tfgrid-sdk-go/grid-client/deployer"
-	"github.com/threefoldtech/tfgrid-sdk-go/grid-client/workloads"
-	"github.com/threefoldtech/tfgrid-sdk-go/grid-client/zos"
+	"github.com/scottyeager/tfgrid-sdk-go/grid-client/deployer"
+	"github.com/scottyeager/tfgrid-sdk-go/grid-client/workloads"
+	"github.com/scottyeager/tfgrid-sdk-go/grid-client/zos"
 	"golang.org/x/crypto/ssh"
 )
 

@@ -19,7 +19,7 @@ func initSentry(twinID uint32, network string) (gridSentry, error) {
 		}, sentry.Init(sentry.ClientOptions{
 			Dsn:         SentryDSN[network],
 			Environment: network,
-			Debug:       true,
+			Debug:       false,
 			// Set TracesSampleRate to 1.0 to capture 100%
 			// of transactions for performance monitoring.
 			// We recommend adjusting this value in production,

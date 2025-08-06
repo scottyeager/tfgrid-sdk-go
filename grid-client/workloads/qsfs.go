@@ -7,7 +7,7 @@ import (
 	"reflect"
 
 	"github.com/pkg/errors"
-	zosTypes "github.com/threefoldtech/tfgrid-sdk-go/grid-client/zos"
+	zosTypes "github.com/scottyeager/tfgrid-sdk-go/grid-client/zos"
 	"github.com/threefoldtech/zosbase/pkg/gridtypes/zos"
 )
 

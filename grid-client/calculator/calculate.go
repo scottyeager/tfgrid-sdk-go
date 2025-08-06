@@ -3,8 +3,8 @@ package calculator
 import (
 	"math"
 
+	"github.com/scottyeager/tfgrid-sdk-go/grid-client/subi"
 	substrate "github.com/threefoldtech/tfchain/clients/tfchain-client-go"
-	"github.com/threefoldtech/tfgrid-sdk-go/grid-client/subi"
 )
 
 const defaultPricingPolicyID = uint32(1)

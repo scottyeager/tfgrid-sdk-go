@@ -4,9 +4,9 @@ import (
 	"context"
 
 	"github.com/pkg/errors"
-	client "github.com/threefoldtech/tfgrid-sdk-go/grid-client/node"
-	"github.com/threefoldtech/tfgrid-sdk-go/grid-client/workloads"
-	zosTypes "github.com/threefoldtech/tfgrid-sdk-go/grid-client/zos"
+	client "github.com/scottyeager/tfgrid-sdk-go/grid-client/node"
+	"github.com/scottyeager/tfgrid-sdk-go/grid-client/workloads"
+	zosTypes "github.com/scottyeager/tfgrid-sdk-go/grid-client/zos"
 )
 
 // GatewayFQDNDeployer for deploying a GatewayFqdn

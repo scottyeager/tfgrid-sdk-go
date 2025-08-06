@@ -25,7 +25,10 @@ require (
 	golang.zx2c4.com/wireguard/wgctrl v0.0.0-20200609130330-bd2cb7843e1b
 )
 
-require github.com/threefoldtech/zosbase v0.1.4
+require (
+	github.com/scottyeager/tfgrid-sdk-go/grid-client v0.16.8
+	github.com/threefoldtech/zosbase v0.1.4
+)
 
 require (
 	github.com/ChainSafe/go-schnorrkel v1.1.0 // indirect
@@ -58,7 +61,6 @@ require (
 	gonum.org/v1/gonum v0.15.0 // indirect
 	google.golang.org/protobuf v1.34.1 // indirect
 	gopkg.in/natefinch/npipe.v2 v2.0.0-20160621034901-c1b8fa8bdcce // indirect
-	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 

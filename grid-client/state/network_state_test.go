@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/threefoldtech/tfgrid-sdk-go/grid-client/workloads"
-	"github.com/threefoldtech/tfgrid-sdk-go/grid-client/zos"
+	"github.com/scottyeager/tfgrid-sdk-go/grid-client/workloads"
+	"github.com/scottyeager/tfgrid-sdk-go/grid-client/zos"
 )
 
 var nodeID uint32 = 10

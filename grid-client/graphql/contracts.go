@@ -10,10 +10,10 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
-	client "github.com/threefoldtech/tfgrid-sdk-go/grid-client/node"
-	"github.com/threefoldtech/tfgrid-sdk-go/grid-client/subi"
-	"github.com/threefoldtech/tfgrid-sdk-go/grid-client/workloads"
-	"github.com/threefoldtech/tfgrid-sdk-go/grid-client/zos"
+	client "github.com/scottyeager/tfgrid-sdk-go/grid-client/node"
+	"github.com/scottyeager/tfgrid-sdk-go/grid-client/subi"
+	"github.com/scottyeager/tfgrid-sdk-go/grid-client/workloads"
+	"github.com/scottyeager/tfgrid-sdk-go/grid-client/zos"
 )
 
 // ContractsGetter for contracts getter from graphql

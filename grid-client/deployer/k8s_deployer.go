@@ -9,9 +9,9 @@ import (
 
 	"github.com/pkg/errors"
 	zerolog "github.com/rs/zerolog/log"
-	client "github.com/threefoldtech/tfgrid-sdk-go/grid-client/node"
-	"github.com/threefoldtech/tfgrid-sdk-go/grid-client/workloads"
-	zosTypes "github.com/threefoldtech/tfgrid-sdk-go/grid-client/zos"
+	client "github.com/scottyeager/tfgrid-sdk-go/grid-client/node"
+	"github.com/scottyeager/tfgrid-sdk-go/grid-client/workloads"
+	zosTypes "github.com/scottyeager/tfgrid-sdk-go/grid-client/zos"
 	"github.com/threefoldtech/zosbase/pkg/gridtypes"
 	"github.com/threefoldtech/zosbase/pkg/gridtypes/zos"
 )

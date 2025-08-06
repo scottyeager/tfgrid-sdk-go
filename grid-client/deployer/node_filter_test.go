@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	client "github.com/threefoldtech/tfgrid-sdk-go/grid-client/node"
+	client "github.com/scottyeager/tfgrid-sdk-go/grid-client/node"
 	"github.com/threefoldtech/tfgrid-sdk-go/grid-proxy/pkg/types"
 	"github.com/threefoldtech/zosbase/pkg/gridtypes/zos"
 )

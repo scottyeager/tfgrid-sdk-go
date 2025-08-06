@@ -3,9 +3,9 @@ package deployer
 import (
 	"testing"
 
+	"github.com/scottyeager/tfgrid-sdk-go/grid-client/workloads"
+	zosTypes "github.com/scottyeager/tfgrid-sdk-go/grid-client/zos"
 	"github.com/stretchr/testify/assert"
-	"github.com/threefoldtech/tfgrid-sdk-go/grid-client/workloads"
-	zosTypes "github.com/threefoldtech/tfgrid-sdk-go/grid-client/zos"
 )
 
 func TestDeploymentUtils(t *testing.T) {

@@ -9,8 +9,8 @@ import (
 	"github.com/hashicorp/go-multierror"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
-	"github.com/threefoldtech/tfgrid-sdk-go/grid-client/workloads"
-	"github.com/threefoldtech/tfgrid-sdk-go/grid-client/zos"
+	"github.com/scottyeager/tfgrid-sdk-go/grid-client/workloads"
+	"github.com/scottyeager/tfgrid-sdk-go/grid-client/zos"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 

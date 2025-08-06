@@ -8,10 +8,10 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"github.com/threefoldtech/tfgrid-sdk-go/grid-client/deployer"
-	node "github.com/threefoldtech/tfgrid-sdk-go/grid-client/node"
-	"github.com/threefoldtech/tfgrid-sdk-go/grid-client/workloads"
-	"github.com/threefoldtech/tfgrid-sdk-go/grid-client/zos"
+	"github.com/scottyeager/tfgrid-sdk-go/grid-client/deployer"
+	node "github.com/scottyeager/tfgrid-sdk-go/grid-client/node"
+	"github.com/scottyeager/tfgrid-sdk-go/grid-client/workloads"
+	"github.com/scottyeager/tfgrid-sdk-go/grid-client/zos"
 )
 
 func ConvertGPUsToStr(gpus []node.GPU) (zosGPUs []zos.GPU) {

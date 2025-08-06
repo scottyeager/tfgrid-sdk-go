@@ -9,11 +9,11 @@ import (
 
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
-	"github.com/threefoldtech/tfgrid-sdk-go/grid-client/mocks"
-	client "github.com/threefoldtech/tfgrid-sdk-go/grid-client/node"
-	"github.com/threefoldtech/tfgrid-sdk-go/grid-client/state"
-	"github.com/threefoldtech/tfgrid-sdk-go/grid-client/workloads"
-	zosTypes "github.com/threefoldtech/tfgrid-sdk-go/grid-client/zos"
+	"github.com/scottyeager/tfgrid-sdk-go/grid-client/mocks"
+	client "github.com/scottyeager/tfgrid-sdk-go/grid-client/node"
+	"github.com/scottyeager/tfgrid-sdk-go/grid-client/state"
+	"github.com/scottyeager/tfgrid-sdk-go/grid-client/workloads"
+	zosTypes "github.com/scottyeager/tfgrid-sdk-go/grid-client/zos"
 )
 
 func constructTestNetwork() workloads.ZNet {

@@ -11,7 +11,7 @@ import (
 	"github.com/centrifuge/go-substrate-rpc-client/v4/types"
 	gomock "github.com/golang/mock/gomock"
 	substrate "github.com/threefoldtech/tfchain/clients/tfchain-client-go"
-	subi "github.com/threefoldtech/tfgrid-sdk-go/grid-client/subi"
+	subi "github.com/scottyeager/tfgrid-sdk-go/grid-client/subi"
 )
 
 // MockManagerInterface is a mock of ManagerInterface interface.

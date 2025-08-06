@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"github.com/threefoldtech/tfgrid-sdk-go/grid-client/subi"
+	"github.com/scottyeager/tfgrid-sdk-go/grid-client/subi"
 	"github.com/threefoldtech/tfgrid-sdk-go/rmb-sdk-go"
 )
 

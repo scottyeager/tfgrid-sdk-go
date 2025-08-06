@@ -8,10 +8,10 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/scottyeager/tfgrid-sdk-go/grid-client/deployer"
+	"github.com/scottyeager/tfgrid-sdk-go/grid-client/workloads"
+	"github.com/scottyeager/tfgrid-sdk-go/grid-client/zos"
 	"github.com/stretchr/testify/require"
-	"github.com/threefoldtech/tfgrid-sdk-go/grid-client/deployer"
-	"github.com/threefoldtech/tfgrid-sdk-go/grid-client/workloads"
-	"github.com/threefoldtech/tfgrid-sdk-go/grid-client/zos"
 )
 
 func TestVMWLight(t *testing.T) {

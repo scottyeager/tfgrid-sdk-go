@@ -8,8 +8,8 @@ import (
 	reflect "reflect"
 
 	gomock "github.com/golang/mock/gomock"
-	client "github.com/threefoldtech/tfgrid-sdk-go/grid-client/node"
-	subi "github.com/threefoldtech/tfgrid-sdk-go/grid-client/subi"
+	client "github.com/scottyeager/tfgrid-sdk-go/grid-client/node"
+	subi "github.com/scottyeager/tfgrid-sdk-go/grid-client/subi"
 )
 
 // MockNodeClientGetter is a mock of NodeClientGetter interface.
