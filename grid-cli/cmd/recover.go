@@ -68,7 +68,7 @@ without losing data stored on attached disks and volumes.`,
 		}
 
 		// Phase 2: Contract Selection
-		fmt.Println("\nListing VM contracts for twin...")
+		contractFlag, _ := cmd.Flags().GetUint64("contract")
 
 		contracts, err := t.ContractsGetter.ListContractsByTwinID([]string{"Created"})
 		if err != nil {
@@ -80,40 +80,60 @@ without losing data stored on attached disks and volumes.`,
 			os.Exit(0)
 		}
 
-		vmContracts := []graphql.Contract{}
-		for _, c := range contracts.NodeContracts {
-			data, _ := workloads.ParseDeploymentData(c.DeploymentData)
-			if data.Type == "vm" {
-				vmContracts = append(vmContracts, c)
-				fmt.Printf("Contract ID: %v Node ID: %v Deployment data: %v\n", c.ContractID, c.NodeID, c.DeploymentData)
-			}
-		}
-
-		if len(vmContracts) == 0 {
-			fmt.Println("No VM contracts found. Exiting.")
-			os.Exit(0)
-		}
-
-		fmt.Print("\nPlease enter the contract ID for the VM you'd like to reset: ")
-
-		contractInput, err := scanner.ReadString('\n')
-		if err != nil {
-			log.Fatal().Err(err).Send()
-		}
-		contractInput = strings.TrimSpace(contractInput)
-
 		var contract graphql.Contract
-		found := false
-		for _, c := range vmContracts {
-			if c.ContractID == contractInput {
-				contract = c
-				found = true
-				break
+		if contractFlag != 0 {
+			// Direct contract ID mode - skip listing
+			contractStr := strconv.FormatUint(contractFlag, 10)
+			found := false
+			for _, c := range contracts.NodeContracts {
+				if c.ContractID == contractStr {
+					contract = c
+					found = true
+					break
+				}
 			}
-		}
+			if !found {
+				log.Fatal().Msgf("Contract %d not found among active contracts for this twin.", contractFlag)
+			}
+			fmt.Printf("Using contract %s on node %d\n", contract.ContractID, contract.NodeID)
+		} else {
+			// Interactive mode - list and prompt
+			fmt.Println("\nListing VM contracts for twin...")
 
-		if !found {
-			log.Fatal().Msg("Invalid contract ID. Please select a contract ID from the list above.")
+			vmContracts := []graphql.Contract{}
+			for _, c := range contracts.NodeContracts {
+				data, _ := workloads.ParseDeploymentData(c.DeploymentData)
+				if data.Type == "vm" {
+					vmContracts = append(vmContracts, c)
+					fmt.Printf("Contract ID: %v Node ID: %v Deployment data: %v\n", c.ContractID, c.NodeID, c.DeploymentData)
+				}
+			}
+
+			if len(vmContracts) == 0 {
+				fmt.Println("No VM contracts found. Exiting.")
+				os.Exit(0)
+			}
+
+			fmt.Print("\nPlease enter the contract ID for the VM you'd like to reset: ")
+
+			contractInput, err := scanner.ReadString('\n')
+			if err != nil {
+				log.Fatal().Err(err).Send()
+			}
+			contractInput = strings.TrimSpace(contractInput)
+
+			found := false
+			for _, c := range vmContracts {
+				if c.ContractID == contractInput {
+					contract = c
+					found = true
+					break
+				}
+			}
+
+			if !found {
+				log.Fatal().Msg("Invalid contract ID. Please select a contract ID from the list above.")
+			}
 		}
 
 		// Phase 3: Deployment Retrieval & Validation
@@ -746,4 +766,6 @@ func init() {
 	rootCmd.AddCommand(resetVMCmd)
 	resetVMCmd.Flags().Bool("detach-only", false,
 		"Stop after detaching VM, leaving disks floating. Use this for testing or manual recovery.")
+	resetVMCmd.Flags().Uint64("contract", 0,
+		"Specify contract ID directly, skipping interactive contract listing.")
 }
