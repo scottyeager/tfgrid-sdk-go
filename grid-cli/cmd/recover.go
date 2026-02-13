@@ -146,24 +146,51 @@ without losing data stored on attached disks and volumes.`,
 
 		t.State.CurrentNodeDeployments[nodeID] = append(t.State.CurrentNodeDeployments[nodeID], uint64(contractID))
 
-		data, err := workloads.ParseDeploymentData(contract.DeploymentData)
-		if err != nil {
-			log.Fatal().Err(err).Send()
-		}
-
-		name := data.Name
-		projectName := data.ProjectName
-
 		fmt.Println("Retrieving deployment data...")
 
-		_, zosDeployment, err := t.State.GetWorkloadInDeployment(ctx, nodeID, "", name)
-		if err != nil {
-			log.Fatal().Err(err).Send()
-		}
+		var name, projectName string
+		var deployment workloads.Deployment
 
-		deployment, err := workloads.NewDeploymentFromZosDeployment(zosDeployment, nodeID)
+		data, err := workloads.ParseDeploymentData(contract.DeploymentData)
 		if err != nil {
-			log.Fatal().Err(err).Send()
+			// GraphQL deployment data is empty/invalid — fetch deployment directly from the node
+			fmt.Println("GraphQL deployment data unavailable, fetching from node...")
+
+			nodeClient, ncErr := t.NcPool.GetNodeClient(t.SubstrateConn, nodeID)
+			if ncErr != nil {
+				log.Fatal().Err(ncErr).Msg("Failed to get node client")
+			}
+
+			zosDeployment, depErr := nodeClient.DeploymentGet(ctx, uint64(contractID))
+			if depErr != nil {
+				log.Fatal().Err(depErr).Msg("Failed to fetch deployment from node")
+			}
+
+			data, err = workloads.ParseDeploymentData(zosDeployment.Metadata)
+			if err != nil {
+				log.Fatal().Err(err).Msg("Failed to parse deployment metadata from node")
+			}
+
+			name = data.Name
+			projectName = data.ProjectName
+
+			deployment, err = workloads.NewDeploymentFromZosDeployment(zosDeployment, nodeID)
+			if err != nil {
+				log.Fatal().Err(err).Send()
+			}
+		} else {
+			name = data.Name
+			projectName = data.ProjectName
+
+			_, zosDeployment, err := t.State.GetWorkloadInDeployment(ctx, nodeID, "", name)
+			if err != nil {
+				log.Fatal().Err(err).Send()
+			}
+
+			deployment, err = workloads.NewDeploymentFromZosDeployment(zosDeployment, nodeID)
+			if err != nil {
+				log.Fatal().Err(err).Send()
+			}
 		}
 
 		s, err := json.MarshalIndent(deployment, "", "\t")
