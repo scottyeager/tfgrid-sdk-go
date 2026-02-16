@@ -62,7 +62,7 @@ without losing data stored on attached disks and volumes.`,
 			mnemonics, network = cfg.Mnemonics, cfg.Network
 		}
 
-		t, err := deployer.NewTFPluginClient(mnemonics, deployer.WithNetwork(network), deployer.WithRMBTimeout(100))
+		t, err := deployer.NewTFPluginClient(mnemonics, deployer.WithNetwork(network), deployer.WithRMBTimeout(300))
 		if err != nil {
 			log.Fatal().Err(err).Send()
 		}
