@@ -243,6 +243,7 @@ are auto-detected from the state, skipping most interactive prompts.`,
 		}
 
 		contractFlag, _ := cmd.Flags().GetUint64("contract")
+		autoApprove, _ := cmd.Flags().GetBool("yes")
 
 		// These are the key variables we need to determine (from terraform or interactively)
 		var (
@@ -560,22 +561,29 @@ are auto-detected from the state, skipping most interactive prompts.`,
 		// FQDN (only for FQDN type)
 		var fqdn string
 		if gatewayType == workloads.GatewayFQDNType {
-			if tfFQDN != "" {
-				fmt.Printf("\nFQDN from Terraform state: %s\n", tfFQDN)
-				fmt.Printf("Enter FQDN (or press Enter to use %s): ", tfFQDN)
+			if autoApprove && tfFQDN != "" {
+				fqdn = tfFQDN
+				fmt.Printf("FQDN: %s (from Terraform state)\n", fqdn)
+			} else if autoApprove {
+				log.Fatal().Msg("Cannot auto-approve: FQDN is required but not available from Terraform state. Run without -y.")
 			} else {
-				fmt.Print("\nEnter FQDN (e.g. cloud.example.com): ")
-			}
-			fqdnInput, err := scanner.ReadString('\n')
-			if err != nil {
-				log.Fatal().Err(err).Send()
-			}
-			fqdn = strings.TrimSpace(fqdnInput)
-			if fqdn == "" {
 				if tfFQDN != "" {
-					fqdn = tfFQDN
+					fmt.Printf("\nFQDN from Terraform state: %s\n", tfFQDN)
+					fmt.Printf("Enter FQDN (or press Enter to use %s): ", tfFQDN)
 				} else {
-					log.Fatal().Msg("FQDN is required for FQDN gateway type.")
+					fmt.Print("\nEnter FQDN (e.g. cloud.example.com): ")
+				}
+				fqdnInput, err := scanner.ReadString('\n')
+				if err != nil {
+					log.Fatal().Err(err).Send()
+				}
+				fqdn = strings.TrimSpace(fqdnInput)
+				if fqdn == "" {
+					if tfFQDN != "" {
+						fqdn = tfFQDN
+					} else {
+						log.Fatal().Msg("FQDN is required for FQDN gateway type.")
+					}
 				}
 			}
 		}
@@ -586,45 +594,57 @@ are auto-detected from the state, skipping most interactive prompts.`,
 			defaultBackend = tfBackends[0]
 		}
 
-		if defaultBackend != "" {
-			if fromTF {
-				fmt.Printf("Backend from Terraform state: %s\n", defaultBackend)
-			} else {
-				fmt.Printf("Auto-detected backend: %s\n", defaultBackend)
-			}
-			fmt.Printf("Enter backend URL (or press Enter to use %s): ", defaultBackend)
+		var backendURL string
+		if autoApprove && defaultBackend != "" {
+			backendURL = defaultBackend
+			fmt.Printf("Backend: %s (auto)\n", backendURL)
+		} else if autoApprove {
+			log.Fatal().Msg("Cannot auto-approve: backend URL is required but not available. Run without -y.")
 		} else {
-			fmt.Print("Enter backend URL (e.g. http://10.20.2.2:80): ")
-		}
-		backendInput, err := scanner.ReadString('\n')
-		if err != nil {
-			log.Fatal().Err(err).Send()
-		}
-		backendURL := strings.TrimSpace(backendInput)
-		if backendURL == "" {
 			if defaultBackend != "" {
-				backendURL = defaultBackend
+				if fromTF {
+					fmt.Printf("Backend from Terraform state: %s\n", defaultBackend)
+				} else {
+					fmt.Printf("Auto-detected backend: %s\n", defaultBackend)
+				}
+				fmt.Printf("Enter backend URL (or press Enter to use %s): ", defaultBackend)
 			} else {
-				log.Fatal().Msg("Backend URL is required.")
+				fmt.Print("Enter backend URL (e.g. http://10.20.2.2:80): ")
+			}
+			backendInput, err := scanner.ReadString('\n')
+			if err != nil {
+				log.Fatal().Err(err).Send()
+			}
+			backendURL = strings.TrimSpace(backendInput)
+			if backendURL == "" {
+				if defaultBackend != "" {
+					backendURL = defaultBackend
+				} else {
+					log.Fatal().Msg("Backend URL is required.")
+				}
 			}
 		}
 
 		// TLS passthrough
-		tlsDefault := "no"
-		if tfTLS {
-			tlsDefault = "yes"
-		}
-		fmt.Printf("Enable TLS passthrough? (yes/no) [%s]: ", tlsDefault)
-		tlsInput, err := scanner.ReadString('\n')
-		if err != nil {
-			log.Fatal().Err(err).Send()
-		}
-		tlsInput = strings.TrimSpace(strings.ToLower(tlsInput))
 		var tlsPassthrough bool
-		if tlsInput == "" {
+		if autoApprove {
 			tlsPassthrough = tfTLS
 		} else {
-			tlsPassthrough = tlsInput == "yes" || tlsInput == "y"
+			tlsDefault := "no"
+			if tfTLS {
+				tlsDefault = "yes"
+			}
+			fmt.Printf("Enable TLS passthrough? (yes/no) [%s]: ", tlsDefault)
+			tlsInput, err := scanner.ReadString('\n')
+			if err != nil {
+				log.Fatal().Err(err).Send()
+			}
+			tlsInput = strings.TrimSpace(strings.ToLower(tlsInput))
+			if tlsInput == "" {
+				tlsPassthrough = tfTLS
+			} else {
+				tlsPassthrough = tlsInput == "yes" || tlsInput == "y"
+			}
 		}
 
 		// Confirmation
@@ -643,14 +663,18 @@ are auto-detected from the state, skipping most interactive prompts.`,
 		fmt.Println("  2. Redeploy the network (updating healthy nodes' peer lists)")
 		fmt.Printf("  3. Deploy a fresh %s gateway on the broken node\n", gatewayType)
 
-		fmt.Printf("\nTo confirm, type 'yes': ")
-		confirmInput, err := scanner.ReadString('\n')
-		if err != nil {
-			log.Fatal().Err(err).Send()
-		}
-		if strings.TrimSpace(strings.ToLower(confirmInput)) != "yes" {
-			fmt.Println("Aborted.")
-			os.Exit(0)
+		if autoApprove {
+			fmt.Println("\nAuto-approved (-y flag).")
+		} else {
+			fmt.Printf("\nTo confirm, type 'yes': ")
+			confirmInput, err := scanner.ReadString('\n')
+			if err != nil {
+				log.Fatal().Err(err).Send()
+			}
+			if strings.TrimSpace(strings.ToLower(confirmInput)) != "yes" {
+				fmt.Println("Aborted.")
+				os.Exit(0)
+			}
 		}
 
 		// Phase 7: Cancel broken contracts
@@ -785,4 +809,6 @@ func init() {
 	rootCmd.AddCommand(repairGatewayCmd)
 	repairGatewayCmd.Flags().Uint64("contract", 0,
 		"Specify gateway contract ID directly, skipping interactive listing.")
+	repairGatewayCmd.Flags().BoolP("yes", "y", false,
+		"Auto-approve all prompts (requires Terraform state or sufficient defaults).")
 }
