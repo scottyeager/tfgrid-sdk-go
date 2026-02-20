@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 
@@ -19,13 +20,189 @@ import (
 	"github.com/threefoldtech/zosbase/pkg/gridtypes/zos"
 )
 
+// Terraform state JSON types for `terraform show -json` output
+type tfShowOutput struct {
+	Values *tfStateValues `json:"values"`
+}
+
+type tfStateValues struct {
+	RootModule tfModule `json:"root_module"`
+}
+
+type tfModule struct {
+	Resources    []tfResource `json:"resources"`
+	ChildModules []tfModule   `json:"child_modules"`
+}
+
+type tfResource struct {
+	Address string                 `json:"address"`
+	Type    string                 `json:"type"`
+	Name    string                 `json:"name"`
+	Values  map[string]interface{} `json:"values"`
+}
+
+type tfGatewayInfo struct {
+	Address        string
+	ContractID     uint64
+	NodeID         uint32
+	Name           string
+	GatewayType    string // workloads.GatewayFQDNType or workloads.GatewayNameType
+	FQDN           string
+	Backends       []string
+	TLSPassthrough bool
+	Network        string
+	SolutionType   string
+}
+
+type tfNetworkInfo struct {
+	Address          string
+	Name             string
+	Nodes            []uint32
+	NodeDeploymentID map[uint32]uint64
+}
+
+// collectTFResources recursively collects all resources from terraform modules
+func collectTFResources(mod tfModule) []tfResource {
+	resources := make([]tfResource, 0, len(mod.Resources))
+	resources = append(resources, mod.Resources...)
+	for _, child := range mod.ChildModules {
+		resources = append(resources, collectTFResources(child)...)
+	}
+	return resources
+}
+
+// tryLoadTerraformState attempts to run `terraform show -json` and extract gateway/network info
+func tryLoadTerraformState() ([]tfGatewayInfo, []tfNetworkInfo, error) {
+	out, err := exec.Command("terraform", "show", "-json").Output()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var state tfShowOutput
+	if err := json.Unmarshal(out, &state); err != nil {
+		return nil, nil, err
+	}
+
+	if state.Values == nil {
+		return nil, nil, fmt.Errorf("no state values")
+	}
+
+	resources := collectTFResources(state.Values.RootModule)
+
+	var gateways []tfGatewayInfo
+	var networks []tfNetworkInfo
+
+	for _, r := range resources {
+		switch r.Type {
+		case "grid_fqdn_proxy":
+			if gw := extractTFGateway(r, workloads.GatewayFQDNType); gw != nil {
+				gateways = append(gateways, *gw)
+			}
+		case "grid_name_proxy":
+			if gw := extractTFGateway(r, workloads.GatewayNameType); gw != nil {
+				gateways = append(gateways, *gw)
+			}
+		case "grid_network":
+			if net := extractTFNetwork(r); net != nil {
+				networks = append(networks, *net)
+			}
+		}
+	}
+
+	return gateways, networks, nil
+}
+
+func extractTFGateway(r tfResource, gwType string) *tfGatewayInfo {
+	v := r.Values
+
+	idStr, _ := v["id"].(string)
+	contractID, err := strconv.ParseUint(idStr, 10, 64)
+	if err != nil || contractID == 0 {
+		return nil
+	}
+
+	nodeFloat, _ := v["node"].(float64)
+	name, _ := v["name"].(string)
+	fqdn, _ := v["fqdn"].(string)
+	tlsPassthrough, _ := v["tls_passthrough"].(bool)
+	network, _ := v["network"].(string)
+	solutionType, _ := v["solution_type"].(string)
+
+	var backends []string
+	if bks, ok := v["backends"].([]interface{}); ok {
+		for _, b := range bks {
+			if s, ok := b.(string); ok {
+				backends = append(backends, s)
+			}
+		}
+	}
+
+	return &tfGatewayInfo{
+		Address:        r.Address,
+		ContractID:     contractID,
+		NodeID:         uint32(nodeFloat),
+		Name:           name,
+		GatewayType:    gwType,
+		FQDN:           fqdn,
+		Backends:       backends,
+		TLSPassthrough: tlsPassthrough,
+		Network:        network,
+		SolutionType:   solutionType,
+	}
+}
+
+func extractTFNetwork(r tfResource) *tfNetworkInfo {
+	v := r.Values
+
+	name, _ := v["name"].(string)
+
+	var nodes []uint32
+	if nodeList, ok := v["nodes"].([]interface{}); ok {
+		for _, n := range nodeList {
+			if nf, ok := n.(float64); ok {
+				nodes = append(nodes, uint32(nf))
+			}
+		}
+	}
+
+	nodeDeploymentID := make(map[uint32]uint64)
+	if ndid, ok := v["node_deployment_id"].(map[string]interface{}); ok {
+		for nodeStr, cidVal := range ndid {
+			nodeID, err := strconv.ParseUint(nodeStr, 10, 32)
+			if err != nil {
+				continue
+			}
+			var cid uint64
+			switch c := cidVal.(type) {
+			case float64:
+				cid = uint64(c)
+			case string:
+				cid, _ = strconv.ParseUint(c, 10, 64)
+			}
+			if cid > 0 {
+				nodeDeploymentID[uint32(nodeID)] = cid
+			}
+		}
+	}
+
+	return &tfNetworkInfo{
+		Address:          r.Address,
+		Name:             name,
+		Nodes:            nodes,
+		NodeDeploymentID: nodeDeploymentID,
+	}
+}
+
 var repairGatewayCmd = &cobra.Command{
 	Use:   "repair-gateway",
 	Short: "Repair a broken gateway by canceling orphaned contracts and redeploying",
 	Long: `Repair a gateway whose node lost its deployment data.
 This command cancels orphaned contracts on the broken node and redeploys
 the network and gateway workloads fresh, while leaving healthy nodes untouched.
-Supports both FQDN and Name gateway types.`,
+Supports both FQDN and Name gateway types.
+
+If run from a directory with Terraform state, gateway and network parameters
+are auto-detected from the state, skipping most interactive prompts.`,
 	Args: cobra.ExactArgs(0),
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx := cmd.Context()
@@ -65,145 +242,302 @@ Supports both FQDN and Name gateway types.`,
 			log.Fatal().Err(err).Send()
 		}
 
-		// Phase 2: Contract Discovery — find gateway contracts
 		contractFlag, _ := cmd.Flags().GetUint64("contract")
 
-		contracts, err := t.ContractsGetter.ListContractsByTwinID([]string{"Created"})
-		if err != nil {
-			log.Fatal().Err(err).Send()
-		}
+		// These are the key variables we need to determine (from terraform or interactively)
+		var (
+			brokenNodeID      uint32
+			gwContractID      uint64
+			gatewayName       string
+			projectName       string
+			gatewayType       string
+			networkContractID uint64
+			networkName       string
+			networkContractIDs map[uint32]uint64 // node → contract for the network across all nodes
 
-		if len(contracts.NodeContracts) == 0 {
-			fmt.Println("No contracts found on this twin. Exiting.")
-			os.Exit(0)
-		}
+			// Pre-populated from terraform state (empty if not available)
+			tfFQDN     string
+			tfBackends []string
+			tfTLS      bool
+			fromTF     bool
+		)
 
-		var gwContract graphql.Contract
-		if contractFlag != 0 {
-			contractStr := strconv.FormatUint(contractFlag, 10)
-			found := false
-			for _, c := range contracts.NodeContracts {
-				if c.ContractID == contractStr {
-					gwContract = c
-					found = true
-					break
+		// Try loading Terraform state
+		tfGateways, tfNetworks, tfErr := tryLoadTerraformState()
+
+		if tfErr == nil && len(tfGateways) > 0 {
+			fmt.Printf("\nTerraform state detected with %d gateway(s):\n", len(tfGateways))
+			for i, gw := range tfGateways {
+				fmt.Printf("  %d. %s  type=%s  node=%d  contract=%d\n",
+					i+1, gw.Address, gw.GatewayType, gw.NodeID, gw.ContractID)
+			}
+
+			var selectedGW *tfGatewayInfo
+
+			if contractFlag != 0 {
+				// --contract flag takes precedence — find matching terraform resource
+				for i := range tfGateways {
+					if tfGateways[i].ContractID == contractFlag {
+						selectedGW = &tfGateways[i]
+						break
+					}
+				}
+				if selectedGW == nil {
+					fmt.Printf("Contract %d not found in Terraform state, falling back to chain query.\n", contractFlag)
+				}
+			} else if len(tfGateways) == 1 {
+				selectedGW = &tfGateways[0]
+				contractFlag = selectedGW.ContractID
+				fmt.Printf("\nAuto-selected: %s (contract %d)\n", selectedGW.Address, selectedGW.ContractID)
+			} else {
+				fmt.Print("\nSelect gateway to repair (number): ")
+				input, _ := scanner.ReadString('\n')
+				input = strings.TrimSpace(input)
+				idx, parseErr := strconv.Atoi(input)
+				if parseErr == nil && idx >= 1 && idx <= len(tfGateways) {
+					selectedGW = &tfGateways[idx-1]
+					contractFlag = selectedGW.ContractID
+				} else {
+					fmt.Println("Invalid selection, falling back to chain query.")
 				}
 			}
-			if !found {
-				log.Fatal().Msgf("Contract %d not found among active contracts for this twin.", contractFlag)
-			}
-			fmt.Printf("Using contract %s on node %d\n", gwContract.ContractID, gwContract.NodeID)
-		} else {
-			fmt.Println("\nListing gateway contracts for twin...")
 
-			gwContracts := []graphql.Contract{}
-			for _, c := range contracts.NodeContracts {
-				data, _ := workloads.ParseDeploymentData(c.DeploymentData)
-				if data.Type == workloads.GatewayFQDNType || data.Type == workloads.GatewayNameType {
-					gwContracts = append(gwContracts, c)
-					fmt.Printf("Contract ID: %v  Node ID: %v  Type: %v  Data: %v\n",
-						c.ContractID, c.NodeID, data.Type, c.DeploymentData)
+			if selectedGW != nil {
+				fromTF = true
+				brokenNodeID = selectedGW.NodeID
+				gwContractID = selectedGW.ContractID
+				gatewayName = selectedGW.Name
+				projectName = selectedGW.SolutionType
+				gatewayType = selectedGW.GatewayType
+				tfFQDN = selectedGW.FQDN
+				tfBackends = selectedGW.Backends
+				tfTLS = selectedGW.TLSPassthrough
+				networkName = selectedGW.Network
+
+				fmt.Printf("\nFrom Terraform state:\n")
+				fmt.Printf("  Gateway: %s (%s) on node %d\n", gatewayName, gatewayType, brokenNodeID)
+				if tfFQDN != "" {
+					fmt.Printf("  FQDN: %s\n", tfFQDN)
+				}
+				if len(tfBackends) > 0 {
+					fmt.Printf("  Backends: %v\n", tfBackends)
+				}
+				fmt.Printf("  Network: %s\n", networkName)
+
+				// Find the matching network resource to get node_deployment_id
+				for _, net := range tfNetworks {
+					if net.Name == networkName {
+						networkContractIDs = net.NodeDeploymentID
+
+						// The broken node's network contract
+						if cid, ok := net.NodeDeploymentID[brokenNodeID]; ok {
+							networkContractID = cid
+						}
+
+						fmt.Printf("\nFrom Terraform network '%s' (%s):\n", net.Name, net.Address)
+						for node, cid := range net.NodeDeploymentID {
+							marker := ""
+							if node == brokenNodeID {
+								marker = " (BROKEN)"
+							}
+							fmt.Printf("  Node %d: contract %d%s\n", node, cid, marker)
+						}
+						break
+					}
+				}
+
+				if networkContractID == 0 {
+					fmt.Println("Warning: could not find network contract for broken node in Terraform state.")
+					fmt.Println("Falling back to chain query for network info.")
+					fromTF = false
 				}
 			}
+		}
 
-			if len(gwContracts) == 0 {
-				fmt.Println("No gateway contracts found. Exiting.")
-				os.Exit(0)
-			}
-
-			fmt.Print("\nPlease enter the contract ID for the broken gateway: ")
-			contractInput, err := scanner.ReadString('\n')
+		// Fallback: interactive discovery from chain if terraform state didn't provide everything
+		if !fromTF {
+			contracts, err := t.ContractsGetter.ListContractsByTwinID([]string{"Created"})
 			if err != nil {
 				log.Fatal().Err(err).Send()
 			}
-			contractInput = strings.TrimSpace(contractInput)
 
-			found := false
-			for _, c := range gwContracts {
-				if c.ContractID == contractInput {
-					gwContract = c
-					found = true
+			if len(contracts.NodeContracts) == 0 {
+				fmt.Println("No contracts found on this twin. Exiting.")
+				os.Exit(0)
+			}
+
+			// Phase 2: Contract Discovery
+			var gwContract graphql.Contract
+			if contractFlag != 0 {
+				contractStr := strconv.FormatUint(contractFlag, 10)
+				found := false
+				for _, c := range contracts.NodeContracts {
+					if c.ContractID == contractStr {
+						gwContract = c
+						found = true
+						break
+					}
+				}
+				if !found {
+					log.Fatal().Msgf("Contract %d not found among active contracts for this twin.", contractFlag)
+				}
+				fmt.Printf("Using contract %s on node %d\n", gwContract.ContractID, gwContract.NodeID)
+			} else {
+				fmt.Println("\nListing gateway contracts for twin...")
+
+				gwContracts := []graphql.Contract{}
+				for _, c := range contracts.NodeContracts {
+					data, _ := workloads.ParseDeploymentData(c.DeploymentData)
+					if data.Type == workloads.GatewayFQDNType || data.Type == workloads.GatewayNameType {
+						gwContracts = append(gwContracts, c)
+						fmt.Printf("Contract ID: %v  Node ID: %v  Type: %v  Data: %v\n",
+							c.ContractID, c.NodeID, data.Type, c.DeploymentData)
+					}
+				}
+
+				if len(gwContracts) == 0 {
+					fmt.Println("No gateway contracts found. Exiting.")
+					os.Exit(0)
+				}
+
+				fmt.Print("\nPlease enter the contract ID for the broken gateway: ")
+				contractInput, err := scanner.ReadString('\n')
+				if err != nil {
+					log.Fatal().Err(err).Send()
+				}
+				contractInput = strings.TrimSpace(contractInput)
+
+				found := false
+				for _, c := range gwContracts {
+					if c.ContractID == contractInput {
+						gwContract = c
+						found = true
+						break
+					}
+				}
+
+				if !found {
+					log.Fatal().Msg("Invalid contract ID. Please select a contract ID from the list above.")
+				}
+			}
+
+			// Phase 3: Identify broken node & related contracts
+			brokenNodeID = gwContract.NodeID
+			gwContractID, err = strconv.ParseUint(gwContract.ContractID, 10, 64)
+			if err != nil {
+				log.Fatal().Err(err).Send()
+			}
+
+			gwData, err := workloads.ParseDeploymentData(gwContract.DeploymentData)
+			if err != nil {
+				log.Fatal().Err(err).Msgf("Failed to parse gateway contract deployment data")
+			}
+
+			gatewayName = gwData.Name
+			projectName = gwData.ProjectName
+			gatewayType = gwData.Type
+
+			fmt.Printf("\nBroken gateway: name=%s type=%s project=%s node=%d\n",
+				gatewayName, gatewayType, projectName, brokenNodeID)
+
+			// Find the network contract on the broken node
+			for _, c := range contracts.NodeContracts {
+				if c.NodeID != brokenNodeID {
+					continue
+				}
+				data, parseErr := workloads.ParseDeploymentData(c.DeploymentData)
+				if parseErr != nil {
+					continue
+				}
+				if data.Type == workloads.NetworkType {
+					cID, parseErr := strconv.ParseUint(c.ContractID, 10, 64)
+					if parseErr != nil {
+						continue
+					}
+					networkContractID = cID
+					networkName = data.Name
 					break
 				}
 			}
 
-			if !found {
-				log.Fatal().Msg("Invalid contract ID. Please select a contract ID from the list above.")
+			if networkContractID == 0 || networkName == "" {
+				log.Fatal().Msg("Could not find a network contract on the broken node.")
+			}
+
+			fmt.Printf("Found network contract %d (network: %s) on broken node %d\n",
+				networkContractID, networkName, brokenNodeID)
+
+			// Find all network contracts across all nodes
+			networkContractIDs, err = t.ContractsGetter.GetNodeContractsByTypeAndName(
+				projectName, workloads.NetworkType, networkName)
+			if err != nil {
+				log.Fatal().Err(err).Msg("Failed to find network contracts")
+			}
+
+			fmt.Printf("Network '%s' spans %d node(s):", networkName, len(networkContractIDs))
+			for node, cID := range networkContractIDs {
+				marker := ""
+				if node == brokenNodeID {
+					marker = " (BROKEN)"
+				}
+				fmt.Printf("  node %d contract %d%s", node, cID, marker)
+			}
+			fmt.Println()
+
+			// Auto-discover VM backend from healthy nodes
+			fmt.Println("\nSearching for VMs on healthy network nodes...")
+			for node := range networkContractIDs {
+				if node == brokenNodeID {
+					continue
+				}
+				for _, c := range contracts.NodeContracts {
+					if c.NodeID != node {
+						continue
+					}
+					data, parseErr := workloads.ParseDeploymentData(c.DeploymentData)
+					if parseErr != nil || data.Type != workloads.VMType {
+						continue
+					}
+
+					vmContractID, parseErr := strconv.ParseUint(c.ContractID, 10, 64)
+					if parseErr != nil {
+						continue
+					}
+
+					t.State.CurrentNodeDeployments[node] = append(
+						t.State.CurrentNodeDeployments[node], vmContractID)
+
+					deployment, loadErr := t.State.LoadDeploymentFromGrid(ctx, node, data.Name)
+					if loadErr != nil {
+						fmt.Printf("  Could not load deployment %s on node %d: %v\n",
+							data.Name, node, loadErr)
+						continue
+					}
+
+					for _, vm := range deployment.Vms {
+						if vm.IP != "" {
+							fmt.Printf("  Found VM '%s' on node %d with IP: %s\n",
+								vm.Name, node, vm.IP)
+							if len(tfBackends) == 0 {
+								tfBackends = []string{fmt.Sprintf("http://%s:80", vm.IP)}
+							}
+						}
+					}
+				}
 			}
 		}
 
-		// Phase 3: Identify broken node & related contracts
-		brokenNodeID := gwContract.NodeID
-		gwContractID, err := strconv.ParseUint(gwContract.ContractID, 10, 64)
-		if err != nil {
-			log.Fatal().Err(err).Send()
-		}
-
-		gwData, err := workloads.ParseDeploymentData(gwContract.DeploymentData)
-		if err != nil {
-			log.Fatal().Err(err).Msgf("Failed to parse gateway contract deployment data")
-		}
-
-		gatewayName := gwData.Name
-		projectName := gwData.ProjectName
-		gatewayType := gwData.Type
-
+		// Validate gateway type
 		if gatewayType != workloads.GatewayFQDNType && gatewayType != workloads.GatewayNameType {
 			log.Fatal().Msgf("Unsupported gateway type: %s. Expected '%s' or '%s'.",
 				gatewayType, workloads.GatewayFQDNType, workloads.GatewayNameType)
 		}
 
-		fmt.Printf("\nBroken gateway: name=%s type=%s project=%s node=%d\n", gatewayName, gatewayType, projectName, brokenNodeID)
-
-		// Find the network contract on the broken node
-		var networkContractID uint64
-		var networkName string
-		for _, c := range contracts.NodeContracts {
-			if c.NodeID != brokenNodeID {
-				continue
-			}
-			data, parseErr := workloads.ParseDeploymentData(c.DeploymentData)
-			if parseErr != nil {
-				continue
-			}
-			if data.Type == workloads.NetworkType {
-				cID, parseErr := strconv.ParseUint(c.ContractID, 10, 64)
-				if parseErr != nil {
-					continue
-				}
-				networkContractID = cID
-				networkName = data.Name
-				break
-			}
-		}
-
-		if networkContractID == 0 || networkName == "" {
-			log.Fatal().Msg("Could not find a network contract on the broken node.")
-		}
-
-		fmt.Printf("Found network contract %d (network: %s) on broken node %d\n", networkContractID, networkName, brokenNodeID)
-
-		// Find all network contracts across all nodes for this network name
-		networkContractIDs, err := t.ContractsGetter.GetNodeContractsByTypeAndName(projectName, workloads.NetworkType, networkName)
-		if err != nil {
-			log.Fatal().Err(err).Msg("Failed to find network contracts")
-		}
-
-		fmt.Printf("Network '%s' spans %d node(s):", networkName, len(networkContractIDs))
-		for node, cID := range networkContractIDs {
-			marker := ""
-			if node == brokenNodeID {
-				marker = " (BROKEN)"
-			}
-			fmt.Printf("  node %d contract %d%s", node, cID, marker)
-		}
-		fmt.Println()
-
 		// Phase 4: Load network from healthy nodes only
 		// Register only healthy nodes' network contracts in State
 		for node, cID := range networkContractIDs {
 			if node == brokenNodeID {
-				continue // skip broken node — contacting it would fail
+				continue
 			}
 			t.State.CurrentNodeDeployments[node] = append(t.State.CurrentNodeDeployments[node], cID)
 		}
@@ -213,51 +547,10 @@ Supports both FQDN and Name gateway types.`,
 			log.Fatal().Err(err).Msg("Failed to load network from healthy nodes")
 		}
 
-		fmt.Printf("Network loaded from %d healthy node(s). IP range: %s\n", len(znet.Nodes), znet.IPRange.String())
+		fmt.Printf("Network loaded from %d healthy node(s). IP range: %s\n",
+			len(znet.Nodes), znet.IPRange.String())
 
-		// Phase 5: Auto-discover VM backend from healthy nodes
-		fmt.Println("\nSearching for VMs on healthy network nodes...")
-		var discoveredBackend string
-		for node := range networkContractIDs {
-			if node == brokenNodeID {
-				continue
-			}
-			// Find VM contracts on this node
-			for _, c := range contracts.NodeContracts {
-				if c.NodeID != node {
-					continue
-				}
-				data, parseErr := workloads.ParseDeploymentData(c.DeploymentData)
-				if parseErr != nil || data.Type != workloads.VMType {
-					continue
-				}
-
-				vmContractID, parseErr := strconv.ParseUint(c.ContractID, 10, 64)
-				if parseErr != nil {
-					continue
-				}
-
-				// Register this VM contract so we can load the deployment
-				t.State.CurrentNodeDeployments[node] = append(t.State.CurrentNodeDeployments[node], vmContractID)
-
-				deployment, loadErr := t.State.LoadDeploymentFromGrid(ctx, node, data.Name)
-				if loadErr != nil {
-					fmt.Printf("  Could not load deployment %s on node %d: %v\n", data.Name, node, loadErr)
-					continue
-				}
-
-				for _, vm := range deployment.Vms {
-					if vm.IP != "" {
-						fmt.Printf("  Found VM '%s' on node %d with network IP: %s\n", vm.Name, node, vm.IP)
-						if discoveredBackend == "" {
-							discoveredBackend = fmt.Sprintf("http://%s:80", vm.IP)
-						}
-					}
-				}
-			}
-		}
-
-		// Phase 6: Collect gateway parameters
+		// Phase 6: Collect gateway parameters (pre-populated from terraform or VM discovery)
 		fmt.Println("\n=== GATEWAY REPAIR PARAMETERS ===")
 		fmt.Printf("Gateway name: %s\n", gatewayName)
 		fmt.Printf("Gateway type: %s\n", gatewayType)
@@ -267,21 +560,39 @@ Supports both FQDN and Name gateway types.`,
 		// FQDN (only for FQDN type)
 		var fqdn string
 		if gatewayType == workloads.GatewayFQDNType {
-			fmt.Print("\nEnter FQDN (e.g. cloud.example.com): ")
+			if tfFQDN != "" {
+				fmt.Printf("\nFQDN from Terraform state: %s\n", tfFQDN)
+				fmt.Printf("Enter FQDN (or press Enter to use %s): ", tfFQDN)
+			} else {
+				fmt.Print("\nEnter FQDN (e.g. cloud.example.com): ")
+			}
 			fqdnInput, err := scanner.ReadString('\n')
 			if err != nil {
 				log.Fatal().Err(err).Send()
 			}
 			fqdn = strings.TrimSpace(fqdnInput)
 			if fqdn == "" {
-				log.Fatal().Msg("FQDN is required for FQDN gateway type.")
+				if tfFQDN != "" {
+					fqdn = tfFQDN
+				} else {
+					log.Fatal().Msg("FQDN is required for FQDN gateway type.")
+				}
 			}
 		}
 
 		// Backend URL
-		if discoveredBackend != "" {
-			fmt.Printf("Auto-detected backend: %s\n", discoveredBackend)
-			fmt.Printf("Enter backend URL (or press Enter to use %s): ", discoveredBackend)
+		defaultBackend := ""
+		if len(tfBackends) > 0 {
+			defaultBackend = tfBackends[0]
+		}
+
+		if defaultBackend != "" {
+			if fromTF {
+				fmt.Printf("Backend from Terraform state: %s\n", defaultBackend)
+			} else {
+				fmt.Printf("Auto-detected backend: %s\n", defaultBackend)
+			}
+			fmt.Printf("Enter backend URL (or press Enter to use %s): ", defaultBackend)
 		} else {
 			fmt.Print("Enter backend URL (e.g. http://10.20.2.2:80): ")
 		}
@@ -291,21 +602,30 @@ Supports both FQDN and Name gateway types.`,
 		}
 		backendURL := strings.TrimSpace(backendInput)
 		if backendURL == "" {
-			if discoveredBackend != "" {
-				backendURL = discoveredBackend
+			if defaultBackend != "" {
+				backendURL = defaultBackend
 			} else {
 				log.Fatal().Msg("Backend URL is required.")
 			}
 		}
 
 		// TLS passthrough
-		fmt.Print("Enable TLS passthrough? (yes/no) [no]: ")
+		tlsDefault := "no"
+		if tfTLS {
+			tlsDefault = "yes"
+		}
+		fmt.Printf("Enable TLS passthrough? (yes/no) [%s]: ", tlsDefault)
 		tlsInput, err := scanner.ReadString('\n')
 		if err != nil {
 			log.Fatal().Err(err).Send()
 		}
 		tlsInput = strings.TrimSpace(strings.ToLower(tlsInput))
-		tlsPassthrough := tlsInput == "yes" || tlsInput == "y"
+		var tlsPassthrough bool
+		if tlsInput == "" {
+			tlsPassthrough = tfTLS
+		} else {
+			tlsPassthrough = tlsInput == "yes" || tlsInput == "y"
+		}
 
 		// Confirmation
 		fmt.Println("\n=== REPAIR SUMMARY ===")
@@ -404,7 +724,6 @@ Supports both FQDN and Name gateway types.`,
 				log.Fatal().Err(err).Msg("Failed to deploy FQDN gateway")
 			}
 
-			// Phase 10: Verification
 			fmt.Println("\n=== REPAIR COMPLETE ===")
 			fmt.Printf("Gateway contract ID: %d\n", gw.ContractID)
 			fmt.Printf("FQDN: %s\n", fqdn)
@@ -412,10 +731,7 @@ Supports both FQDN and Name gateway types.`,
 			fmt.Printf("Network: %s\n", networkName)
 			fmt.Printf("Node: %d\n", brokenNodeID)
 
-			fmt.Println("\nNetwork deployment IDs:")
-			for node, cID := range znet.NodeDeploymentID {
-				fmt.Printf("  Node %d: contract %d\n", node, cID)
-			}
+			printNetworkDeploymentIDs(znet.NodeDeploymentID)
 
 			gwInfo, _ := json.MarshalIndent(gw, "", "\t")
 			fmt.Println("\nGateway details:\n" + string(gwInfo))
@@ -440,7 +756,6 @@ Supports both FQDN and Name gateway types.`,
 				log.Fatal().Err(err).Msg("Failed to deploy Name gateway")
 			}
 
-			// Phase 10: Verification
 			fmt.Println("\n=== REPAIR COMPLETE ===")
 			fmt.Printf("Gateway contract ID: %d\n", gw.ContractID)
 			fmt.Printf("FQDN: %s\n", gw.FQDN)
@@ -448,10 +763,7 @@ Supports both FQDN and Name gateway types.`,
 			fmt.Printf("Network: %s\n", networkName)
 			fmt.Printf("Node: %d\n", brokenNodeID)
 
-			fmt.Println("\nNetwork deployment IDs:")
-			for node, cID := range znet.NodeDeploymentID {
-				fmt.Printf("  Node %d: contract %d\n", node, cID)
-			}
+			printNetworkDeploymentIDs(znet.NodeDeploymentID)
 
 			gwInfo, _ := json.MarshalIndent(gw, "", "\t")
 			fmt.Println("\nGateway details:\n" + string(gwInfo))
@@ -460,6 +772,13 @@ Supports both FQDN and Name gateway types.`,
 			fmt.Println("Please verify that your DNS record for", gw.FQDN, "points to the gateway node.")
 		}
 	},
+}
+
+func printNetworkDeploymentIDs(nodeDeploymentID map[uint32]uint64) {
+	fmt.Println("\nNetwork deployment IDs:")
+	for node, cID := range nodeDeploymentID {
+		fmt.Printf("  Node %d: contract %d\n", node, cID)
+	}
 }
 
 func init() {
