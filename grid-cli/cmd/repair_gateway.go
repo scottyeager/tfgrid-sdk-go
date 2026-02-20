@@ -694,11 +694,18 @@ are auto-detected from the state, skipping most interactive prompts.`,
 
 		// Phase 7: Cancel broken contracts
 		fmt.Println("\nCanceling orphaned contracts on broken node...")
-		err = t.BatchCancelContract([]uint64{gwContractID, networkContractID})
-		if err != nil {
-			log.Fatal().Err(err).Msg("Failed to cancel contracts. You may need to cancel them manually.")
+		for _, cid := range []uint64{gwContractID, networkContractID} {
+			err = t.SubstrateConn.CancelContract(t.Identity, cid)
+			if err != nil {
+				if strings.Contains(err.Error(), "ContractNotExists") {
+					fmt.Printf("Contract %d already canceled, skipping.\n", cid)
+				} else {
+					log.Fatal().Err(err).Msgf("Failed to cancel contract %d. You may need to cancel it manually.", cid)
+				}
+			} else {
+				fmt.Printf("Canceled contract %d\n", cid)
+			}
 		}
-		fmt.Printf("Canceled contracts: %d, %d\n", gwContractID, networkContractID)
 
 		// Phase 8: Redeploy network
 		fmt.Println("\nRedeploying network...")
