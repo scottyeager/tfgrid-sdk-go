@@ -247,6 +247,7 @@ are auto-detected from the state, skipping most interactive prompts.`,
 
 		contractFlag, _ := cmd.Flags().GetUint64("contract")
 		autoApprove, _ := cmd.Flags().GetBool("yes")
+		wgConfigOnly, _ := cmd.Flags().GetBool("wg-config")
 
 		// These are the key variables we need to determine (from terraform or interactively)
 		var (
@@ -483,11 +484,21 @@ are auto-detected from the state, skipping most interactive prompts.`,
 			fmt.Printf("Found network contract %d (network: %s) on broken node %d\n",
 				networkContractID, networkName, brokenNodeID)
 
-			// Find all network contracts across all nodes
-			networkContractIDs, err = t.ContractsGetter.GetNodeContractsByTypeAndName(
-				projectName, workloads.NetworkType, networkName)
-			if err != nil {
-				log.Fatal().Err(err).Msg("Failed to find network contracts")
+			// Find all network contracts across all nodes using already-loaded contracts
+			// (avoids querying the broken node, which would fail with "deployment not found")
+			networkContractIDs = make(map[uint32]uint64)
+			for _, c := range contracts.NodeContracts {
+				data, parseErr := workloads.ParseDeploymentData(c.DeploymentData)
+				if parseErr != nil {
+					continue
+				}
+				if data.Type == workloads.NetworkType && data.Name == networkName {
+					cID, parseErr := strconv.ParseUint(c.ContractID, 10, 64)
+					if parseErr != nil {
+						continue
+					}
+					networkContractIDs[c.NodeID] = cID
+				}
 			}
 
 			fmt.Printf("Network '%s' spans %d node(s):", networkName, len(networkContractIDs))
@@ -565,6 +576,14 @@ are auto-detected from the state, skipping most interactive prompts.`,
 
 		fmt.Printf("Network loaded from %d healthy node(s). IP range: %s\n",
 			len(znet.Nodes), znet.IPRange.String())
+
+		if wgConfigOnly {
+			if znet.AccessWGConfig == "" {
+				log.Fatal().Msg("No WireGuard access configured on this network.")
+			}
+			fmt.Println(znet.AccessWGConfig)
+			return
+		}
 
 		// Phase 6: Collect gateway parameters (pre-populated from terraform or VM discovery)
 		fmt.Println("\n=== GATEWAY REPAIR PARAMETERS ===")
@@ -782,6 +801,11 @@ are auto-detected from the state, skipping most interactive prompts.`,
 			gwInfo, _ := json.MarshalIndent(gw, "", "\t")
 			fmt.Println("\nGateway details:\n" + string(gwInfo))
 
+			if znet.AccessWGConfig != "" {
+				fmt.Println("\n=== WIREGUARD CONFIG ===")
+				fmt.Println(znet.AccessWGConfig)
+			}
+
 			fmt.Println("\nGateway repair completed successfully!")
 			fmt.Println("Please verify that your DNS record for", fqdn, "points to the gateway node.")
 		} else {
@@ -832,6 +856,11 @@ are auto-detected from the state, skipping most interactive prompts.`,
 			gwInfo, _ := json.MarshalIndent(gw, "", "\t")
 			fmt.Println("\nGateway details:\n" + string(gwInfo))
 
+			if znet.AccessWGConfig != "" {
+				fmt.Println("\n=== WIREGUARD CONFIG ===")
+				fmt.Println(znet.AccessWGConfig)
+			}
+
 			fmt.Println("\nGateway repair completed successfully!")
 			fmt.Println("Please verify that your DNS record for", gw.FQDN, "points to the gateway node.")
 		}
@@ -851,4 +880,6 @@ func init() {
 		"Specify gateway contract ID directly, skipping interactive listing.")
 	repairGatewayCmd.Flags().BoolP("yes", "y", false,
 		"Auto-approve all prompts (requires Terraform state or sufficient defaults).")
+	repairGatewayCmd.Flags().Bool("wg-config", false,
+		"Retrieve and print the WireGuard config for the network, then exit (no repair).")
 }
