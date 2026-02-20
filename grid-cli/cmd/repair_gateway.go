@@ -52,6 +52,7 @@ type tfGatewayInfo struct {
 	TLSPassthrough bool
 	Network        string
 	SolutionType   string
+	NameContractID uint64
 }
 
 type tfNetworkInfo struct {
@@ -127,6 +128,7 @@ func extractTFGateway(r tfResource, gwType string) *tfGatewayInfo {
 	tlsPassthrough, _ := v["tls_passthrough"].(bool)
 	network, _ := v["network"].(string)
 	solutionType, _ := v["solution_type"].(string)
+	nameContractIDFloat, _ := v["name_contract_id"].(float64)
 
 	var backends []string
 	if bks, ok := v["backends"].([]interface{}); ok {
@@ -148,6 +150,7 @@ func extractTFGateway(r tfResource, gwType string) *tfGatewayInfo {
 		TLSPassthrough: tlsPassthrough,
 		Network:        network,
 		SolutionType:   solutionType,
+		NameContractID: uint64(nameContractIDFloat),
 	}
 }
 
@@ -253,6 +256,7 @@ are auto-detected from the state, skipping most interactive prompts.`,
 			projectName       string
 			gatewayType       string
 			networkContractID uint64
+			nameContractID    uint64
 			networkName       string
 			networkContractIDs map[uint32]uint64 // node → contract for the network across all nodes
 
@@ -310,6 +314,7 @@ are auto-detected from the state, skipping most interactive prompts.`,
 				gatewayName = selectedGW.Name
 				projectName = selectedGW.SolutionType
 				gatewayType = selectedGW.GatewayType
+				nameContractID = selectedGW.NameContractID
 				tfFQDN = selectedGW.FQDN
 				tfBackends = selectedGW.Backends
 				tfTLS = selectedGW.TLSPassthrough
@@ -440,6 +445,16 @@ are auto-detected from the state, skipping most interactive prompts.`,
 
 			fmt.Printf("\nBroken gateway: name=%s type=%s project=%s node=%d\n",
 				gatewayName, gatewayType, projectName, brokenNodeID)
+
+			// Find the name contract for GatewayNameProxy gateways
+			if gatewayType == workloads.GatewayNameType {
+				for _, nc := range contracts.NameContracts {
+					if nc.Name == gatewayName {
+						nameContractID, _ = strconv.ParseUint(nc.ContractID, 10, 64)
+						break
+					}
+				}
+			}
 
 			// Find the network contract on the broken node
 			for _, c := range contracts.NodeContracts {
@@ -763,6 +778,23 @@ are auto-detected from the state, skipping most interactive prompts.`,
 			fmt.Println("\nGateway repair completed successfully!")
 			fmt.Println("Please verify that your DNS record for", fqdn, "points to the gateway node.")
 		} else {
+			// Ensure we have the name contract ID for GatewayNameProxy
+			if nameContractID == 0 {
+				contracts, err := t.ContractsGetter.ListContractsByTwinID([]string{"Created"})
+				if err == nil {
+					for _, nc := range contracts.NameContracts {
+						if nc.Name == gatewayName {
+							nameContractID, _ = strconv.ParseUint(nc.ContractID, 10, 64)
+							break
+						}
+					}
+				}
+				if nameContractID == 0 {
+					log.Fatal().Msg("Could not find name contract for gateway name. It may need to be recreated manually.")
+				}
+				fmt.Printf("Found existing name contract: %d\n", nameContractID)
+			}
+
 			fmt.Println("\nDeploying Name gateway...")
 
 			gw := workloads.GatewayNameProxy{
@@ -772,6 +804,7 @@ are auto-detected from the state, skipping most interactive prompts.`,
 				TLSPassthrough:   tlsPassthrough,
 				Network:          networkName,
 				SolutionType:     projectName,
+				NameContractID:   nameContractID,
 				NodeDeploymentID: map[uint32]uint64{},
 			}
 
