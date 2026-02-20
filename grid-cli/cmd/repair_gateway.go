@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -569,9 +570,31 @@ are auto-detected from the state, skipping most interactive prompts.`,
 			t.State.CurrentNodeDeployments[node] = append(t.State.CurrentNodeDeployments[node], cID)
 		}
 
-		znet, err := t.State.LoadNetworkFromGrid(ctx, networkName)
-		if err != nil {
-			log.Fatal().Err(err).Msg("Failed to load network from healthy nodes")
+		var znet workloads.ZNet
+		for {
+			znet, err = t.State.LoadNetworkFromGrid(ctx, networkName)
+			if err == nil {
+				break
+			}
+
+			// If a node is unreachable (timeout, connection error), remove it and retry
+			re := regexp.MustCompile(`node (?:client: )?(\d+)`)
+			matches := re.FindStringSubmatch(err.Error())
+			if matches == nil {
+				log.Fatal().Err(err).Msg("Failed to load network from healthy nodes")
+			}
+
+			failedNode, parseErr := strconv.ParseUint(matches[1], 10, 32)
+			if parseErr != nil {
+				log.Fatal().Err(err).Msg("Failed to load network from healthy nodes")
+			}
+
+			fmt.Printf("Node %d is unreachable, skipping: %v\n", failedNode, err)
+			delete(t.State.CurrentNodeDeployments, uint32(failedNode))
+
+			if len(t.State.CurrentNodeDeployments) == 0 {
+				log.Fatal().Msg("No reachable network nodes remaining")
+			}
 		}
 
 		fmt.Printf("Network loaded from %d healthy node(s). IP range: %s\n",
