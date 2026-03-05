@@ -280,6 +280,7 @@ without losing data stored on attached disks and volumes.`,
 		}
 
 		networkLoaded := false
+		var recoveredNetwork *workloads.ZNet
 		if deployment.NetworkName != "" {
 			networkContractIDs, err := t.ContractsGetter.GetNodeContractsByTypeAndName(projectName, workloads.NetworkType, deployment.NetworkName)
 			if err != nil {
@@ -315,9 +316,10 @@ without losing data stored on attached disks and volumes.`,
 					t.State.CurrentNodeDeployments[node] = append(t.State.CurrentNodeDeployments[node], cID)
 				}
 
-				_, loadErr := t.State.LoadNetworkFromGrid(ctx, deployment.NetworkName)
+				znet, loadErr := t.State.LoadNetworkFromGrid(ctx, deployment.NetworkName)
 				if loadErr == nil {
 					networkLoaded = true
+					recoveredNetwork = &znet
 				} else {
 					fmt.Printf("Warning: network '%s' contracts exist but failed to load: %v\n", deployment.NetworkName, loadErr)
 				}
@@ -359,6 +361,7 @@ without losing data stored on attached disks and volumes.`,
 			fmt.Printf("Network '%s' created successfully.\n", networkName)
 
 			deployment.NetworkName = networkName
+			recoveredNetwork = &rcvrNetwork
 		}
 
 		// Phase 5: User Confirmation
@@ -700,10 +703,22 @@ without losing data stored on attached disks and volumes.`,
 
 			err = t.DeploymentDeployer.Deploy(ctx, &deployment)
 			if err != nil {
-				log.Fatal().Err(err).Msg("Failed to detach VM. The disks should still be safe.")
-			}
+				fmt.Printf("Deploy returned error: %v\n", err)
+				fmt.Println("Checking if deployment update succeeded on the node anyway...")
 
-			fmt.Println("VM detached successfully. Storage preserved.")
+				syncErr := t.DeploymentDeployer.Sync(ctx, &deployment)
+				if syncErr != nil {
+					log.Fatal().Err(err).Msg("Failed to detach VM and could not verify node state. The disks should still be safe.")
+				}
+
+				if len(deployment.Vms) == 0 {
+					fmt.Println("Verified: VM was detached successfully despite the timeout.")
+				} else {
+					log.Fatal().Err(err).Msg("Failed to detach VM. The disks should still be safe.")
+				}
+			} else {
+				fmt.Println("VM detached successfully. Storage preserved.")
+			}
 
 			// Check for --detach-only flag
 			detachOnly, err := cmd.Flags().GetBool("detach-only")
@@ -787,7 +802,19 @@ without losing data stored on attached disks and volumes.`,
 
 		err = t.DeploymentDeployer.Deploy(ctx, &deployment)
 		if err != nil {
-			log.Fatal().Err(err).Msg("Failed to create new VM. Your data disks are preserved. You can retry the reset command or manually deploy a new VM.")
+			fmt.Printf("Deploy returned error: %v\n", err)
+			fmt.Println("Checking if VM was created on the node anyway...")
+
+			syncErr := t.DeploymentDeployer.Sync(ctx, &deployment)
+			if syncErr != nil {
+				log.Fatal().Err(err).Msg("Failed to create new VM and could not verify node state. Your data disks are preserved. You can retry the reset command.")
+			}
+
+			if len(deployment.Vms) > 0 {
+				fmt.Println("Verified: VM was created successfully despite the timeout.")
+			} else {
+				log.Fatal().Err(err).Msg("Failed to create new VM. Your data disks are preserved. You can retry the reset command or manually deploy a new VM.")
+			}
 		}
 
 		// Phase 9: Verification
@@ -812,6 +839,12 @@ without losing data stored on attached disks and volumes.`,
 		for _, mount := range mounts {
 			fmt.Printf("  %s -> %s\n", mount.Name, mount.MountPoint)
 		}
+		// Print WireGuard config if available
+		if recoveredNetwork != nil && recoveredNetwork.AccessWGConfig != "" {
+			fmt.Println("\n=== WIREGUARD CONFIG ===")
+			fmt.Println(recoveredNetwork.AccessWGConfig)
+		}
+
 		if isFloatingDisk {
 			fmt.Println("\nFloating disk recovery completed successfully!")
 		} else {
