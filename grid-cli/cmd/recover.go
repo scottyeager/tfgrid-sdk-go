@@ -279,26 +279,55 @@ without losing data stored on attached disks and volumes.`,
 			}
 		}
 
+		networkLoaded := false
 		if deployment.NetworkName != "" {
 			networkContractIDs, err := t.ContractsGetter.GetNodeContractsByTypeAndName(projectName, workloads.NetworkType, deployment.NetworkName)
 			if err != nil {
 				// Try older naming scheme for compatibility
 				networkContractIDs, err = t.ContractsGetter.GetNodeContractsByTypeAndName("FullVM", workloads.NetworkType, deployment.NetworkName)
-				if err != nil {
-					log.Fatal().Err(err).Send()
+			}
+			if err != nil {
+				// Try finding the network contract directly from all contracts on this node
+				fmt.Printf("Could not find network '%s' by project name, searching all contracts on node %d...\n", deployment.NetworkName, nodeID)
+				for _, c := range contracts.NodeContracts {
+					if c.NodeID != nodeID {
+						continue
+					}
+					cData, parseErr := workloads.ParseDeploymentData(c.DeploymentData)
+					if parseErr != nil {
+						continue
+					}
+					if cData.Type == workloads.NetworkType && cData.Name == deployment.NetworkName {
+						cID, parseErr := strconv.ParseUint(c.ContractID, 10, 64)
+						if parseErr != nil {
+							continue
+						}
+						networkContractIDs = map[uint32]uint64{nodeID: cID}
+						err = nil
+						fmt.Printf("Found network contract %d on node %d\n", cID, nodeID)
+						break
+					}
 				}
 			}
 
-			for node, cID := range networkContractIDs {
-				t.State.CurrentNodeDeployments[node] = append(t.State.CurrentNodeDeployments[node], cID)
-			}
+			if err == nil {
+				for node, cID := range networkContractIDs {
+					t.State.CurrentNodeDeployments[node] = append(t.State.CurrentNodeDeployments[node], cID)
+				}
 
-			_, err = t.State.LoadNetworkFromGrid(ctx, deployment.NetworkName)
-			if err != nil {
-				log.Fatal().Err(err).Send()
+				_, loadErr := t.State.LoadNetworkFromGrid(ctx, deployment.NetworkName)
+				if loadErr == nil {
+					networkLoaded = true
+				} else {
+					fmt.Printf("Warning: network '%s' contracts exist but failed to load: %v\n", deployment.NetworkName, loadErr)
+				}
+			} else {
+				fmt.Printf("Warning: network '%s' not found: %v\n", deployment.NetworkName, err)
 			}
-		} else if isFloatingDisk {
-			// No existing network found - create a new one
+		}
+
+		if !networkLoaded {
+			// Create a new recovery network
 			networkName := deployment.Name + "rcvrnet"
 			recoveryProjectName := fmt.Sprintf("vm/%s", deployment.Name)
 
@@ -307,7 +336,7 @@ without losing data stored on attached disks and volumes.`,
 				log.Fatal().Err(err).Msg("Failed to generate mycelium key")
 			}
 
-			network := workloads.ZNet{
+			rcvrNetwork := workloads.ZNet{
 				Name:  networkName,
 				Nodes: []uint32{deployment.NodeID},
 				IPRange: zos.IPNet{IPNet: net.IPNet{
@@ -318,16 +347,18 @@ without losing data stored on attached disks and volumes.`,
 				SolutionType: recoveryProjectName,
 			}
 
-			fmt.Println("No existing network found. Creating new network for recovery...")
-			err = t.NetworkDeployer.Deploy(ctx, &network)
+			if deployment.NetworkName != "" {
+				fmt.Printf("Original network '%s' is unavailable. Creating new recovery network...\n", deployment.NetworkName)
+			} else {
+				fmt.Println("No existing network found. Creating new network for recovery...")
+			}
+			err = t.NetworkDeployer.Deploy(ctx, &rcvrNetwork)
 			if err != nil {
 				log.Fatal().Err(err).Msg("Failed to create network for recovery")
 			}
 			fmt.Printf("Network '%s' created successfully.\n", networkName)
 
 			deployment.NetworkName = networkName
-		} else {
-			log.Fatal().Msg("Could not determine network name for deployment.")
 		}
 
 		// Phase 5: User Confirmation
