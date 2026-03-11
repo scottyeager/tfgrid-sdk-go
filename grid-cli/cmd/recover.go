@@ -288,6 +288,10 @@ without losing data stored on attached disks and volumes.`,
 				networkContractIDs, err = t.ContractsGetter.GetNodeContractsByTypeAndName("FullVM", workloads.NetworkType, deployment.NetworkName)
 			}
 			if err != nil {
+				// Try default network project name
+				networkContractIDs, err = t.ContractsGetter.GetNodeContractsByTypeAndName("Network", workloads.NetworkType, deployment.NetworkName)
+			}
+			if err != nil {
 				// Try finding the network contract directly from all contracts on this node
 				fmt.Printf("Could not find network '%s' by project name, searching all contracts on node %d...\n", deployment.NetworkName, nodeID)
 				for _, c := range contracts.NodeContracts {
@@ -427,8 +431,8 @@ without losing data stored on attached disks and volumes.`,
 		var sshKey string
 		var cpu uint8
 		var memoryMB, rootfsSizeMB uint64
-		var flist string
-		var publicIP, publicIP6, planetary bool
+		var flist, entrypoint string
+		var publicIP, publicIP6, planetary, mycelium bool
 		var myceliumIPSeed []byte
 
 		if isFloatingDisk {
@@ -494,6 +498,7 @@ without losing data stored on attached disks and volumes.`,
 
 			// Flist/OS selection (no current flist)
 			flist = "https://hub.grid.tf/tf-official-vms/ubuntu-24.04-latest.flist" // Default
+			entrypoint = "/sbin/zinit init"
 			fmt.Println("\nSelect OS:")
 			fmt.Println("  1. Ubuntu 24.04 Micro (default)")
 			fmt.Println("  2. Ubuntu 24.04 Full")
@@ -516,18 +521,25 @@ without losing data stored on attached disks and volumes.`,
 				if customFlist != "" {
 					flist = customFlist
 				}
+				fmt.Print("Enter entrypoint [/sbin/zinit init]: ")
+				epInput, _ := scanner.ReadString('\n')
+				epInput = strings.TrimSpace(epInput)
+				if epInput != "" {
+					entrypoint = epInput
+				}
 			}
 
 			// Network/IP settings with defaults
 			publicIP = false
 			publicIP6 = false
 			planetary = true
+			mycelium = true
 			myceliumIPSeed, err = workloads.RandomMyceliumIPSeed()
 			if err != nil {
 				log.Fatal().Err(err).Msg("Failed to generate mycelium IP seed")
 			}
 
-			fmt.Printf("\nDefault IP settings - PublicIPv4: %v, PublicIPv6: %v, Planetary: %v, Mycelium: true\n", publicIP, publicIP6, planetary)
+			fmt.Printf("\nDefault IP settings - PublicIPv4: %v, PublicIPv6: %v, Planetary: %v, Mycelium: %v\n", publicIP, publicIP6, planetary, mycelium)
 			fmt.Print("Use default IP settings? (yes/no) [yes]: ")
 
 			keepIPDefaults, err := scanner.ReadString('\n')
@@ -551,6 +563,20 @@ without losing data stored on attached disks and volumes.`,
 				planetaryInput, _ := scanner.ReadString('\n')
 				planetaryInput = strings.TrimSpace(strings.ToLower(planetaryInput))
 				planetary = planetaryInput != "no" && planetaryInput != "n"
+
+				fmt.Print("Enable Mycelium network? (yes/no) [yes]: ")
+				myceliumInput, _ := scanner.ReadString('\n')
+				myceliumInput = strings.TrimSpace(strings.ToLower(myceliumInput))
+				mycelium = myceliumInput != "no" && myceliumInput != "n"
+				if mycelium && len(myceliumIPSeed) == 0 {
+					myceliumIPSeed, err = workloads.RandomMyceliumIPSeed()
+					if err != nil {
+						log.Fatal().Err(err).Msg("Failed to generate mycelium IP seed")
+					}
+				}
+				if !mycelium {
+					myceliumIPSeed = nil
+				}
 			}
 		} else {
 			// Normal reset: use existing VM settings as defaults
@@ -624,6 +650,7 @@ without losing data stored on attached disks and volumes.`,
 
 			// Flist/OS selection
 			flist = vm.Flist
+			entrypoint = vm.Entrypoint
 			fmt.Printf("\nCurrent flist: %s\n", flist)
 			fmt.Println("Select OS option:")
 			fmt.Println("  1. Keep current flist")
@@ -641,8 +668,10 @@ without losing data stored on attached disks and volumes.`,
 			switch flistChoice {
 			case "2":
 				flist = "https://hub.grid.tf/tf-official-vms/ubuntu-24.04-latest.flist"
+				entrypoint = "/sbin/zinit init"
 			case "3":
 				flist = "https://hub.grid.tf/tf-official-vms/ubuntu-24.04-full.flist"
+				entrypoint = "/sbin/zinit init"
 			case "4":
 				fmt.Print("Enter custom flist URL: ")
 				customFlist, _ := scanner.ReadString('\n')
@@ -650,12 +679,19 @@ without losing data stored on attached disks and volumes.`,
 				if customFlist != "" {
 					flist = customFlist
 				}
+				fmt.Printf("Enter entrypoint [%s]: ", entrypoint)
+				epInput, _ := scanner.ReadString('\n')
+				epInput = strings.TrimSpace(epInput)
+				if epInput != "" {
+					entrypoint = epInput
+				}
 			}
 
 			// Network/IP settings
 			publicIP = vm.PublicIP
 			publicIP6 = vm.PublicIP6
 			planetary = vm.Planetary
+			mycelium = len(vm.MyceliumIPSeed) > 0
 			myceliumIPSeed = vm.MyceliumIPSeed
 			if len(myceliumIPSeed) == 0 {
 				myceliumIPSeed, err = workloads.RandomMyceliumIPSeed()
@@ -664,7 +700,7 @@ without losing data stored on attached disks and volumes.`,
 				}
 			}
 
-			fmt.Printf("\nCurrent IP settings - PublicIPv4: %v, PublicIPv6: %v, Planetary: %v, Mycelium: true\n", publicIP, publicIP6, planetary)
+			fmt.Printf("\nCurrent IP settings - PublicIPv4: %v, PublicIPv6: %v, Planetary: %v, Mycelium: %v\n", publicIP, publicIP6, planetary, mycelium)
 			fmt.Print("Keep current IP settings? (yes/no) [yes]: ")
 
 			keepIP, err := scanner.ReadString('\n')
@@ -688,6 +724,20 @@ without losing data stored on attached disks and volumes.`,
 				planetaryInput, _ := scanner.ReadString('\n')
 				planetaryInput = strings.TrimSpace(strings.ToLower(planetaryInput))
 				planetary = planetaryInput != "no" && planetaryInput != "n"
+
+				fmt.Print("Enable Mycelium network? (yes/no) [yes]: ")
+				myceliumInput, _ := scanner.ReadString('\n')
+				myceliumInput = strings.TrimSpace(strings.ToLower(myceliumInput))
+				mycelium = myceliumInput != "no" && myceliumInput != "n"
+				if mycelium && len(myceliumIPSeed) == 0 {
+					myceliumIPSeed, err = workloads.RandomMyceliumIPSeed()
+					if err != nil {
+						log.Fatal().Err(err).Msg("Failed to generate mycelium IP seed")
+					}
+				}
+				if !mycelium {
+					myceliumIPSeed = nil
+				}
 			}
 		}
 
@@ -772,22 +822,29 @@ without losing data stored on attached disks and volumes.`,
 			vmName = vm.Name + "reset"
 		}
 
+		// Build env vars: preserve existing ones for normal reset, minimal for floating disk
+		envVars := map[string]string{"SSH_KEY": sshKey}
+		if !isFloatingDisk {
+			envVars = vm.EnvVars
+			envVars["SSH_KEY"] = sshKey
+		}
 
 		// Create new VM with "reset" suffix to prevent ZOS upgrade detection
 		newVM := workloads.VM{
-			Name:         vmName,
-			NodeID:       deployment.NodeID,
-			NetworkName:  deployment.NetworkName,
-			Flist:        flist,
-			CPU:          cpu,
-			MemoryMB:     memoryMB,
-			RootfsSizeMB: rootfsSizeMB,
-			PublicIP:     publicIP,
-			PublicIP6:    publicIP6,
-			Planetary:    planetary,
+			Name:           vmName,
+			NodeID:         deployment.NodeID,
+			NetworkName:    deployment.NetworkName,
+			Flist:          flist,
+			Entrypoint:     entrypoint,
+			CPU:            cpu,
+			MemoryMB:       memoryMB,
+			RootfsSizeMB:   rootfsSizeMB,
+			PublicIP:       publicIP,
+			PublicIP6:      publicIP6,
+			Planetary:      planetary,
 			MyceliumIPSeed: myceliumIPSeed,
-			Mounts:       mounts,
-			EnvVars:      map[string]string{"SSH_KEY": sshKey},
+			Mounts:         mounts,
+			EnvVars:        envVars,
 		}
 
 		deployment.Vms = []workloads.VM{newVM}
