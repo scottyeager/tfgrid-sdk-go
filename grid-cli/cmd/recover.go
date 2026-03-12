@@ -182,9 +182,14 @@ without losing data stored on attached disks and volumes.`,
 			name = data.Name
 			projectName = data.ProjectName
 
-			_, zosDeployment, err := t.State.GetWorkloadInDeployment(ctx, nodeID, "", name)
-			if err != nil {
-				log.Fatal().Err(err).Send()
+			nodeClient, ncErr := t.NcPool.GetNodeClient(t.SubstrateConn, nodeID)
+			if ncErr != nil {
+				log.Fatal().Err(ncErr).Msg("Failed to get node client")
+			}
+
+			zosDeployment, depErr := nodeClient.DeploymentGet(ctx, uint64(contractID))
+			if depErr != nil {
+				log.Fatal().Err(depErr).Msg("Failed to fetch deployment from node")
 			}
 
 			deployment, err = workloads.NewDeploymentFromZosDeployment(zosDeployment, nodeID)
