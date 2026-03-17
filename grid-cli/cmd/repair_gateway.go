@@ -18,6 +18,7 @@ import (
 	"github.com/threefoldtech/tfgrid-sdk-go/grid-client/deployer"
 	"github.com/threefoldtech/tfgrid-sdk-go/grid-client/graphql"
 	"github.com/threefoldtech/tfgrid-sdk-go/grid-client/workloads"
+	gridclientzos "github.com/threefoldtech/tfgrid-sdk-go/grid-client/zos"
 	"github.com/threefoldtech/zosbase/pkg/gridtypes/zos"
 )
 
@@ -247,6 +248,7 @@ are auto-detected from the state, skipping most interactive prompts.`,
 		}
 
 		contractFlag, _ := cmd.Flags().GetUint64("contract")
+		vmContractFlag, _ := cmd.Flags().GetUint64("vm-contract")
 		autoApprove, _ := cmd.Flags().GetBool("yes")
 		wgConfigOnly, _ := cmd.Flags().GetBool("wg-config")
 
@@ -458,117 +460,127 @@ are auto-detected from the state, skipping most interactive prompts.`,
 				}
 			}
 
-			// Try to load the gateway deployment from its node to get the Network field,
-			// backends, TLS setting, etc. This works when the gateway node is healthy.
-			t.State.CurrentNodeDeployments[brokenNodeID] = append(
-				t.State.CurrentNodeDeployments[brokenNodeID], gwContractID)
+			// Determine the network name. Two strategies:
+			// 1. Load the gateway deployment from its node (works when node is healthy)
+			// 2. Load a VM deployment by contract ID to read its network interface
+			//
+			// --vm-contract skips strategy 1 and goes straight to the VM path.
 
-			// Try Name gateway first if we have a name contract or the type suggests it,
-			// otherwise try FQDN. When the metadata type is generic ("gateway"), try both.
-			tryName := gatewayType == workloads.GatewayNameType || nameContractID != 0
-			tryFQDN := gatewayType == workloads.GatewayFQDNType
-			if !tryName && !tryFQDN {
-				// Generic type (e.g. "gateway") — try both
-				tryName = true
-				tryFQDN = true
-			}
+			if vmContractFlag == 0 {
+				// Try to load the gateway deployment from its node
+				t.State.CurrentNodeDeployments[brokenNodeID] = append(
+					t.State.CurrentNodeDeployments[brokenNodeID], gwContractID)
 
-			if tryName {
-				gw, loadErr := t.State.LoadGatewayNameFromGrid(ctx, brokenNodeID, gatewayName, gatewayName)
-				if loadErr == nil {
-					gatewayType = workloads.GatewayNameType
-					networkName = gw.Network
-					nameContractID = gw.NameContractID
-					tfBackends = make([]string, len(gw.Backends))
-					for i, b := range gw.Backends {
-						tfBackends[i] = string(b)
-					}
-					tfTLS = gw.TLSPassthrough
-					fmt.Printf("Loaded Name gateway from node: network=%s\n", networkName)
+				tryName := gatewayType == workloads.GatewayNameType || nameContractID != 0
+				tryFQDN := gatewayType == workloads.GatewayFQDNType
+				if !tryName && !tryFQDN {
+					tryName = true
+					tryFQDN = true
 				}
-			}
-			if tryFQDN && networkName == "" {
-				gw, loadErr := t.State.LoadGatewayFQDNFromGrid(ctx, brokenNodeID, gatewayName, gatewayName)
-				if loadErr == nil {
-					gatewayType = workloads.GatewayFQDNType
-					networkName = gw.Network
-					tfFQDN = gw.FQDN
-					tfBackends = make([]string, len(gw.Backends))
-					for i, b := range gw.Backends {
-						tfBackends[i] = string(b)
+
+				if tryName {
+					gw, loadErr := t.State.LoadGatewayNameFromGrid(ctx, brokenNodeID, gatewayName, gatewayName)
+					if loadErr == nil {
+						gatewayType = workloads.GatewayNameType
+						networkName = gw.Network
+						nameContractID = gw.NameContractID
+						tfBackends = make([]string, len(gw.Backends))
+						for i, b := range gw.Backends {
+							tfBackends[i] = string(b)
+						}
+						tfTLS = gw.TLSPassthrough
+						fmt.Printf("Loaded Name gateway from node: network=%s\n", networkName)
 					}
-					tfTLS = gw.TLSPassthrough
-					fmt.Printf("Loaded FQDN gateway from node: network=%s fqdn=%s\n", networkName, tfFQDN)
 				}
+				if tryFQDN && networkName == "" {
+					gw, loadErr := t.State.LoadGatewayFQDNFromGrid(ctx, brokenNodeID, gatewayName, gatewayName)
+					if loadErr == nil {
+						gatewayType = workloads.GatewayFQDNType
+						networkName = gw.Network
+						tfFQDN = gw.FQDN
+						tfBackends = make([]string, len(gw.Backends))
+						for i, b := range gw.Backends {
+							tfBackends[i] = string(b)
+						}
+						tfTLS = gw.TLSPassthrough
+						fmt.Printf("Loaded FQDN gateway from node: network=%s fqdn=%s\n", networkName, tfFQDN)
+					}
+				}
+
+				delete(t.State.CurrentNodeDeployments, brokenNodeID)
 			}
 
-			// Clean up: remove the gateway contract from state so it doesn't interfere later
-			delete(t.State.CurrentNodeDeployments, brokenNodeID)
-
-			// If we couldn't get the network name from the gateway node, ask for a VM contract
-			// so we can load it and read its NetworkName field.
+			// If we still don't have the network name, resolve it from a VM contract
 			if networkName == "" {
-				fmt.Println("\nCould not load gateway deployment (node may be down).")
-				fmt.Println("To identify the correct network, please provide a VM contract ID on the same network.")
-				fmt.Println("\nVM contracts for this twin:")
-				for _, c := range contracts.NodeContracts {
-					data, parseErr := workloads.ParseDeploymentData(c.DeploymentData)
-					if parseErr != nil || data.Type != workloads.VMType {
-						continue
+				var vmCID uint64
+
+				if vmContractFlag != 0 {
+					vmCID = vmContractFlag
+				} else {
+					fmt.Println("\nCould not load gateway deployment (node may be down).")
+					fmt.Println("To identify the correct network, please provide a VM contract ID on the same network.")
+					fmt.Println("\nVM contracts for this twin:")
+					for _, c := range contracts.NodeContracts {
+						data, parseErr := workloads.ParseDeploymentData(c.DeploymentData)
+						if parseErr != nil || data.Type != workloads.VMType {
+							continue
+						}
+						fmt.Printf("  Contract ID: %s  Node ID: %d  Name: %s  Project: %s\n",
+							c.ContractID, c.NodeID, data.Name, data.ProjectName)
 					}
-					fmt.Printf("  Contract ID: %s  Node ID: %d  Name: %s  Project: %s\n",
-						c.ContractID, c.NodeID, data.Name, data.ProjectName)
+
+					fmt.Print("\nEnter VM contract ID: ")
+					vmInput, readErr := scanner.ReadString('\n')
+					if readErr != nil {
+						log.Fatal().Err(readErr).Send()
+					}
+					vmCID, err = strconv.ParseUint(strings.TrimSpace(vmInput), 10, 64)
+					if err != nil {
+						log.Fatal().Err(err).Msg("Invalid contract ID")
+					}
 				}
 
-				fmt.Print("\nEnter VM contract ID: ")
-				vmInput, readErr := scanner.ReadString('\n')
-				if readErr != nil {
-					log.Fatal().Err(readErr).Send()
-				}
-				vmInput = strings.TrimSpace(vmInput)
-
-				var vmContract graphql.Contract
-				found := false
+				// Find the contract in the list to get the node ID
+				var vmNodeID uint32
+				vmCIDStr := strconv.FormatUint(vmCID, 10)
 				for _, c := range contracts.NodeContracts {
-					if c.ContractID == vmInput {
-						vmContract = c
-						found = true
+					if c.ContractID == vmCIDStr {
+						vmNodeID = c.NodeID
 						break
 					}
 				}
-				if !found {
-					log.Fatal().Msg("VM contract not found among active contracts.")
+				if vmNodeID == 0 {
+					log.Fatal().Msgf("VM contract %d not found among active contracts.", vmCID)
 				}
 
-				vmData, parseErr := workloads.ParseDeploymentData(vmContract.DeploymentData)
-				if parseErr != nil {
-					log.Fatal().Err(parseErr).Msg("Failed to parse VM contract deployment data")
+				// Load the deployment directly by contract ID to avoid name collisions
+				// with other deployments on the same node
+				nodeClient, nodeErr := t.State.NcPool.GetNodeClient(t.State.Substrate, vmNodeID)
+				if nodeErr != nil {
+					log.Fatal().Err(nodeErr).Msgf("Failed to connect to node %d", vmNodeID)
 				}
 
-				vmContractID, parseErr := strconv.ParseUint(vmContract.ContractID, 10, 64)
-				if parseErr != nil {
-					log.Fatal().Err(parseErr).Send()
+				dl, dlErr := nodeClient.DeploymentGet(ctx, vmCID)
+				if dlErr != nil {
+					log.Fatal().Err(dlErr).Msgf("Failed to get deployment %d from node %d", vmCID, vmNodeID)
 				}
 
-				t.State.CurrentNodeDeployments[vmContract.NodeID] = append(
-					t.State.CurrentNodeDeployments[vmContract.NodeID], vmContractID)
-
-				deployment, loadErr := t.State.LoadDeploymentFromGrid(ctx, vmContract.NodeID, vmData.Name)
-				if loadErr != nil {
-					log.Fatal().Err(loadErr).Msgf("Failed to load VM deployment from node %d", vmContract.NodeID)
-				}
-
-				// Clean up state
-				delete(t.State.CurrentNodeDeployments, vmContract.NodeID)
-
-				// Get the network name from the VM
-				for _, vm := range deployment.Vms {
-					if vm.NetworkName != "" {
-						networkName = vm.NetworkName
-						if vm.IP != "" {
-							tfBackends = []string{fmt.Sprintf("http://%s:80", vm.IP)}
+				// Extract network name and IP from the VM workloads
+				for _, wl := range dl.Workloads {
+					if wl.Type != gridclientzos.ZMachineType && wl.Type != gridclientzos.ZMachineLightType {
+						continue
+					}
+					var machine gridclientzos.ZMachine
+					if err := json.Unmarshal(wl.Data, &machine); err != nil {
+						continue
+					}
+					if len(machine.Network.Interfaces) > 0 {
+						networkName = machine.Network.Interfaces[0].Network
+						ip := machine.Network.Interfaces[0].IP.String()
+						if ip != "" && ip != "<nil>" {
+							tfBackends = []string{fmt.Sprintf("http://%s:80", ip)}
 							fmt.Printf("Found VM '%s' on node %d with IP: %s (network: %s)\n",
-								vm.Name, vmContract.NodeID, vm.IP, networkName)
+								wl.Name, vmNodeID, ip, networkName)
 						}
 						break
 					}
@@ -965,6 +977,8 @@ func init() {
 	rootCmd.AddCommand(repairGatewayCmd)
 	repairGatewayCmd.Flags().Uint64("contract", 0,
 		"Specify gateway contract ID directly, skipping interactive listing.")
+	repairGatewayCmd.Flags().Uint64("vm-contract", 0,
+		"Specify a VM contract ID to determine the network (skips gateway node load).")
 	repairGatewayCmd.Flags().BoolP("yes", "y", false,
 		"Auto-approve all prompts (requires Terraform state or sufficient defaults).")
 	repairGatewayCmd.Flags().Bool("wg-config", false,
