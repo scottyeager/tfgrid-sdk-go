@@ -445,7 +445,7 @@ are auto-detected from the state, skipping most interactive prompts.`,
 			projectName = gwData.ProjectName
 			gatewayType = gwData.Type
 
-			fmt.Printf("\nBroken gateway: name=%s type=%s project=%s node=%d\n",
+			fmt.Printf("\nGateway: name=%s type=%s project=%s node=%d\n",
 				gatewayName, gatewayType, projectName, brokenNodeID)
 
 			// Find the name contract for GatewayNameProxy gateways
@@ -458,100 +458,139 @@ are auto-detected from the state, skipping most interactive prompts.`,
 				}
 			}
 
-			// Find the network contract on the broken node
-			for _, c := range contracts.NodeContracts {
-				if c.NodeID != brokenNodeID {
-					continue
-				}
-				data, parseErr := workloads.ParseDeploymentData(c.DeploymentData)
-				if parseErr != nil {
-					continue
-				}
-				if data.Type == workloads.NetworkType {
-					cID, parseErr := strconv.ParseUint(c.ContractID, 10, 64)
-					if parseErr != nil {
-						continue
+			// Try to load the gateway deployment from its node to get the Network field.
+			// This works when the gateway node is healthy.
+			t.State.CurrentNodeDeployments[brokenNodeID] = append(
+				t.State.CurrentNodeDeployments[brokenNodeID], gwContractID)
+
+			if gatewayType == workloads.GatewayFQDNType {
+				gw, loadErr := t.State.LoadGatewayFQDNFromGrid(ctx, brokenNodeID, gatewayName, gatewayName)
+				if loadErr == nil {
+					networkName = gw.Network
+					tfFQDN = gw.FQDN
+					tfBackends = make([]string, len(gw.Backends))
+					for i, b := range gw.Backends {
+						tfBackends[i] = string(b)
 					}
-					networkContractID = cID
-					networkName = data.Name
-					break
+					tfTLS = gw.TLSPassthrough
+					fmt.Printf("Loaded gateway from node: network=%s fqdn=%s\n", networkName, tfFQDN)
 				}
-			}
-
-			if networkContractID == 0 || networkName == "" {
-				log.Fatal().Msg("Could not find a network contract on the broken node.")
-			}
-
-			fmt.Printf("Found network contract %d (network: %s) on broken node %d\n",
-				networkContractID, networkName, brokenNodeID)
-
-			// Find all network contracts across all nodes using already-loaded contracts
-			// (avoids querying the broken node, which would fail with "deployment not found")
-			networkContractIDs = make(map[uint32]uint64)
-			for _, c := range contracts.NodeContracts {
-				data, parseErr := workloads.ParseDeploymentData(c.DeploymentData)
-				if parseErr != nil {
-					continue
-				}
-				if data.Type == workloads.NetworkType && data.Name == networkName {
-					cID, parseErr := strconv.ParseUint(c.ContractID, 10, 64)
-					if parseErr != nil {
-						continue
+			} else {
+				gw, loadErr := t.State.LoadGatewayNameFromGrid(ctx, brokenNodeID, gatewayName, gatewayName)
+				if loadErr == nil {
+					networkName = gw.Network
+					nameContractID = gw.NameContractID
+					tfBackends = make([]string, len(gw.Backends))
+					for i, b := range gw.Backends {
+						tfBackends[i] = string(b)
 					}
-					networkContractIDs[c.NodeID] = cID
+					tfTLS = gw.TLSPassthrough
+					fmt.Printf("Loaded gateway from node: network=%s\n", networkName)
 				}
 			}
 
-			fmt.Printf("Network '%s' spans %d node(s):", networkName, len(networkContractIDs))
-			for node, cID := range networkContractIDs {
-				marker := ""
-				if node == brokenNodeID {
-					marker = " (BROKEN)"
-				}
-				fmt.Printf("  node %d contract %d%s", node, cID, marker)
-			}
-			fmt.Println()
+			// Clean up: remove the gateway contract from state so it doesn't interfere later
+			delete(t.State.CurrentNodeDeployments, brokenNodeID)
 
-			// Auto-discover VM backend from healthy nodes
-			fmt.Println("\nSearching for VMs on healthy network nodes...")
-			for node := range networkContractIDs {
-				if node == brokenNodeID {
-					continue
-				}
+			// If we couldn't get the network name from the gateway node, ask for a VM contract
+			// so we can load it and read its NetworkName field.
+			if networkName == "" {
+				fmt.Println("\nCould not load gateway deployment (node may be down).")
+				fmt.Println("To identify the correct network, please provide a VM contract ID on the same network.")
+				fmt.Println("\nVM contracts for this twin:")
 				for _, c := range contracts.NodeContracts {
-					if c.NodeID != node {
-						continue
-					}
 					data, parseErr := workloads.ParseDeploymentData(c.DeploymentData)
 					if parseErr != nil || data.Type != workloads.VMType {
 						continue
 					}
+					fmt.Printf("  Contract ID: %s  Node ID: %d  Name: %s  Project: %s\n",
+						c.ContractID, c.NodeID, data.Name, data.ProjectName)
+				}
 
-					vmContractID, parseErr := strconv.ParseUint(c.ContractID, 10, 64)
-					if parseErr != nil {
-						continue
-					}
+				fmt.Print("\nEnter VM contract ID: ")
+				vmInput, readErr := scanner.ReadString('\n')
+				if readErr != nil {
+					log.Fatal().Err(readErr).Send()
+				}
+				vmInput = strings.TrimSpace(vmInput)
 
-					t.State.CurrentNodeDeployments[node] = append(
-						t.State.CurrentNodeDeployments[node], vmContractID)
-
-					deployment, loadErr := t.State.LoadDeploymentFromGrid(ctx, node, data.Name)
-					if loadErr != nil {
-						fmt.Printf("  Could not load deployment %s on node %d: %v\n",
-							data.Name, node, loadErr)
-						continue
-					}
-
-					for _, vm := range deployment.Vms {
-						if vm.IP != "" {
-							fmt.Printf("  Found VM '%s' on node %d with IP: %s\n",
-								vm.Name, node, vm.IP)
-							if len(tfBackends) == 0 {
-								tfBackends = []string{fmt.Sprintf("http://%s:80", vm.IP)}
-							}
-						}
+				var vmContract graphql.Contract
+				found := false
+				for _, c := range contracts.NodeContracts {
+					if c.ContractID == vmInput {
+						vmContract = c
+						found = true
+						break
 					}
 				}
+				if !found {
+					log.Fatal().Msg("VM contract not found among active contracts.")
+				}
+
+				vmData, parseErr := workloads.ParseDeploymentData(vmContract.DeploymentData)
+				if parseErr != nil {
+					log.Fatal().Err(parseErr).Msg("Failed to parse VM contract deployment data")
+				}
+
+				vmContractID, parseErr := strconv.ParseUint(vmContract.ContractID, 10, 64)
+				if parseErr != nil {
+					log.Fatal().Err(parseErr).Send()
+				}
+
+				t.State.CurrentNodeDeployments[vmContract.NodeID] = append(
+					t.State.CurrentNodeDeployments[vmContract.NodeID], vmContractID)
+
+				deployment, loadErr := t.State.LoadDeploymentFromGrid(ctx, vmContract.NodeID, vmData.Name)
+				if loadErr != nil {
+					log.Fatal().Err(loadErr).Msgf("Failed to load VM deployment from node %d", vmContract.NodeID)
+				}
+
+				// Clean up state
+				delete(t.State.CurrentNodeDeployments, vmContract.NodeID)
+
+				// Get the network name from the VM
+				for _, vm := range deployment.Vms {
+					if vm.NetworkName != "" {
+						networkName = vm.NetworkName
+						if vm.IP != "" {
+							tfBackends = []string{fmt.Sprintf("http://%s:80", vm.IP)}
+							fmt.Printf("Found VM '%s' on node %d with IP: %s (network: %s)\n",
+								vm.Name, vmContract.NodeID, vm.IP, networkName)
+						}
+						break
+					}
+				}
+
+				if networkName == "" {
+					log.Fatal().Msg("Could not determine network name from the VM deployment.")
+				}
+			}
+
+			// Now find all network contracts by name
+			networkContractIDs = make(map[uint32]uint64)
+			for _, c := range contracts.NodeContracts {
+				data, parseErr := workloads.ParseDeploymentData(c.DeploymentData)
+				if parseErr != nil || data.Type != workloads.NetworkType || data.Name != networkName {
+					continue
+				}
+				cID, parseErr := strconv.ParseUint(c.ContractID, 10, 64)
+				if parseErr != nil {
+					continue
+				}
+				networkContractIDs[c.NodeID] = cID
+			}
+
+			if cid, ok := networkContractIDs[brokenNodeID]; ok {
+				networkContractID = cid
+			}
+
+			fmt.Printf("Network '%s' spans %d node(s):\n", networkName, len(networkContractIDs))
+			for node, cID := range networkContractIDs {
+				marker := ""
+				if node == brokenNodeID {
+					marker = " (gateway node)"
+				}
+				fmt.Printf("  node %d contract %d%s\n", node, cID, marker)
 			}
 		}
 
