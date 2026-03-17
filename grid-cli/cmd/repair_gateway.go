@@ -396,7 +396,7 @@ are auto-detected from the state, skipping most interactive prompts.`,
 				gwContracts := []graphql.Contract{}
 				for _, c := range contracts.NodeContracts {
 					data, _ := workloads.ParseDeploymentData(c.DeploymentData)
-					if data.Type == workloads.GatewayFQDNType || data.Type == workloads.GatewayNameType {
+					if isGatewayType(data.Type) {
 						gwContracts = append(gwContracts, c)
 						fmt.Printf("Contract ID: %v  Node ID: %v  Type: %v  Data: %v\n",
 							c.ContractID, c.NodeID, data.Type, c.DeploymentData)
@@ -458,26 +458,25 @@ are auto-detected from the state, skipping most interactive prompts.`,
 				}
 			}
 
-			// Try to load the gateway deployment from its node to get the Network field.
-			// This works when the gateway node is healthy.
+			// Try to load the gateway deployment from its node to get the Network field,
+			// backends, TLS setting, etc. This works when the gateway node is healthy.
 			t.State.CurrentNodeDeployments[brokenNodeID] = append(
 				t.State.CurrentNodeDeployments[brokenNodeID], gwContractID)
 
-			if gatewayType == workloads.GatewayFQDNType {
-				gw, loadErr := t.State.LoadGatewayFQDNFromGrid(ctx, brokenNodeID, gatewayName, gatewayName)
-				if loadErr == nil {
-					networkName = gw.Network
-					tfFQDN = gw.FQDN
-					tfBackends = make([]string, len(gw.Backends))
-					for i, b := range gw.Backends {
-						tfBackends[i] = string(b)
-					}
-					tfTLS = gw.TLSPassthrough
-					fmt.Printf("Loaded gateway from node: network=%s fqdn=%s\n", networkName, tfFQDN)
-				}
-			} else {
+			// Try Name gateway first if we have a name contract or the type suggests it,
+			// otherwise try FQDN. When the metadata type is generic ("gateway"), try both.
+			tryName := gatewayType == workloads.GatewayNameType || nameContractID != 0
+			tryFQDN := gatewayType == workloads.GatewayFQDNType
+			if !tryName && !tryFQDN {
+				// Generic type (e.g. "gateway") — try both
+				tryName = true
+				tryFQDN = true
+			}
+
+			if tryName {
 				gw, loadErr := t.State.LoadGatewayNameFromGrid(ctx, brokenNodeID, gatewayName, gatewayName)
 				if loadErr == nil {
+					gatewayType = workloads.GatewayNameType
 					networkName = gw.Network
 					nameContractID = gw.NameContractID
 					tfBackends = make([]string, len(gw.Backends))
@@ -485,7 +484,21 @@ are auto-detected from the state, skipping most interactive prompts.`,
 						tfBackends[i] = string(b)
 					}
 					tfTLS = gw.TLSPassthrough
-					fmt.Printf("Loaded gateway from node: network=%s\n", networkName)
+					fmt.Printf("Loaded Name gateway from node: network=%s\n", networkName)
+				}
+			}
+			if tryFQDN && networkName == "" {
+				gw, loadErr := t.State.LoadGatewayFQDNFromGrid(ctx, brokenNodeID, gatewayName, gatewayName)
+				if loadErr == nil {
+					gatewayType = workloads.GatewayFQDNType
+					networkName = gw.Network
+					tfFQDN = gw.FQDN
+					tfBackends = make([]string, len(gw.Backends))
+					for i, b := range gw.Backends {
+						tfBackends[i] = string(b)
+					}
+					tfTLS = gw.TLSPassthrough
+					fmt.Printf("Loaded FQDN gateway from node: network=%s fqdn=%s\n", networkName, tfFQDN)
 				}
 			}
 
@@ -594,10 +607,16 @@ are auto-detected from the state, skipping most interactive prompts.`,
 			}
 		}
 
-		// Validate gateway type
+		// Resolve gateway type if it's still generic (e.g. "gateway" from non-SDK deployments).
+		// If we loaded the gateway from the node, gatewayType was already set above.
+		// Otherwise, infer from the presence of a name contract.
 		if gatewayType != workloads.GatewayFQDNType && gatewayType != workloads.GatewayNameType {
-			log.Fatal().Msgf("Unsupported gateway type: %s. Expected '%s' or '%s'.",
-				gatewayType, workloads.GatewayFQDNType, workloads.GatewayNameType)
+			if nameContractID != 0 {
+				gatewayType = workloads.GatewayNameType
+			} else {
+				gatewayType = workloads.GatewayFQDNType
+			}
+			fmt.Printf("Inferred gateway type: %s\n", gatewayType)
 		}
 
 		// Phase 4: Load network from healthy nodes only
@@ -927,6 +946,12 @@ are auto-detected from the state, skipping most interactive prompts.`,
 			fmt.Println("Please verify that your DNS record for", gw.FQDN, "points to the gateway node.")
 		}
 	},
+}
+
+// isGatewayType returns true if the deployment data type represents a gateway.
+// Different tools (SDK, Terraform provider, dashboard) may use different type strings.
+func isGatewayType(dataType string) bool {
+	return strings.Contains(strings.ToLower(dataType), "gateway")
 }
 
 func printNetworkDeploymentIDs(nodeDeploymentID map[uint32]uint64) {
